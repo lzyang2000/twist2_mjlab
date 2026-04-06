@@ -1,0 +1,28 @@
+[build-system]
+requires = ["uv_build>=0.8.19,<0.9.0"]
+build-backend = "uv_build"
+
+[project]
+name = "twist2-mjlab"
+version = "0.1.0"
+description = "TWIST2 task package for MJLab"
+requires-python = "==3.10.*"
+dependencies = [
+  "mjlab",
+  "torch==2.8.0",
+]
+
+[project.entry-points."mjlab.tasks"]
+twist2_mjlab = "twist2_mjlab"
+
+[[tool.uv.index]]
+url = "https://pypi.org/simple"
+
+[[tool.uv.index]]
+name = "pytorch-cu129"
+url = "https://download.pytorch.org/whl/cu129"
+explicit = true
+
+[tool.uv.sources]
+mjlab = { git = "https://github.com/mujocolab/mjlab", rev = "60eca4afee7fd6c2c5da55f6f1943bb4dd41b292" }
+torch = { index = "pytorch-cu129", marker = "sys_platform == 'linux'" }
