@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import copy
 import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+import mujoco
+import numpy as np
 import torch
 
 from mjlab.managers import CommandTerm, CommandTermCfg
@@ -25,6 +28,7 @@ from twist2_mjlab.pkl_motion_lib import PklMotionLib
 if TYPE_CHECKING:
 	from mjlab.entity import Entity
 	from mjlab.envs import ManagerBasedRlEnv
+	from mjlab.viewer.debug_visualizer import DebugVisualizer
 
 
 class PklMotionCommand(CommandTerm):
@@ -82,6 +86,10 @@ class PklMotionCommand(CommandTerm):
 		self._current_bin_failed = torch.zeros(
 			self.bin_count, dtype=torch.float, device=self.device
 		)
+
+		# Ghost model created lazily on first visualization.
+		self._ghost_model: mujoco.MjModel | None = None
+		self._ghost_color = np.array(cfg.viz.ghost_color, dtype=np.float32)
 		self.kernel = torch.tensor(
 			[self.cfg.adaptive_lambda**i for i in range(self.cfg.adaptive_kernel_size)],
 			device=self.device,
@@ -103,6 +111,29 @@ class PklMotionCommand(CommandTerm):
 		self.metrics["sampling_entropy"] = torch.zeros(self.num_envs, device=self.device)
 		self.metrics["sampling_top1_prob"] = torch.zeros(self.num_envs, device=self.device)
 		self.metrics["sampling_top1_bin"] = torch.zeros(self.num_envs, device=self.device)
+
+	def _debug_vis_impl(self, visualizer: "DebugVisualizer") -> None:
+		"""Draw the reference motion as a ghost robot."""
+		env_indices = visualizer.get_env_indices(self.num_envs)
+		if not env_indices:
+			return
+
+		if self._ghost_model is None:
+			self._ghost_model = copy.deepcopy(self._env.sim.mj_model)
+			self._ghost_model.geom_rgba[:] = self._ghost_color
+
+		entity: Entity = self._env.scene[self.cfg.entity_name]
+		indexing = entity.indexing
+		free_joint_q_adr = indexing.free_joint_q_adr.cpu().numpy()
+		joint_q_adr = indexing.joint_q_adr.cpu().numpy()
+
+		for batch in env_indices:
+			qpos = np.zeros(self._env.sim.mj_model.nq)
+			qpos[free_joint_q_adr[0:3]] = self.body_pos_w[batch, 0].cpu().numpy()
+			qpos[free_joint_q_adr[3:7]] = self.body_quat_w[batch, 0].cpu().numpy()
+			qpos[joint_q_adr] = self.joint_pos[batch].cpu().numpy()
+
+			visualizer.add_ghost_mesh(qpos, model=self._ghost_model, label=f"ghost_{batch}")
 
 	@property
 	def command(self) -> torch.Tensor:
