@@ -2,11 +2,11 @@
 
 ## Overview
 
-`twist2_mjlab` is a standalone MJLab task package for Unitree G1 motion tracking. The registered task is `Twist2-Flat-Unitree-G1`, and all task-specific logic lives locally under `src/twist2_mjlab/`.
+`twist2_mjlab` is a standalone MJLab task package for Unitree G1 motion tracking based on [TWIST2](https://github.com/amazon-far/TWIST2) in order to enable further development on a supported physics engine (mjwarp) and training framework. The registered task is `Twist2-Flat-Unitree-G1`, and all task-specific logic lives locally under `src/twist2_mjlab/`.
 
 The package loads motion references through a PKL motion library, so the normal workflow is:
 
-1. enrich raw TWIST2 PKLs with MuJoCo forward kinematics,
+1. enrich raw TWIST2 PKLs with MuJoCo forward kinematics (mainly for compatibility with the original motion commands of MJLab’s motion tracking task),
 2. point the task at the resulting motion file,
 3. train with `train_twist2.sh`, and
 4. visualize with `play_twist2.sh`.
