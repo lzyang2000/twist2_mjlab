@@ -189,3 +189,7 @@ If you want to modify the task, these files are the main ones to look at:
 ## One-line summary
 
 `twist2_mjlab` is the self-contained MJLab package for TWIST2 motion tracking on Unitree G1: enrich the PKLs, train with `Twist2-Flat-Unitree-G1`, then play the latest checkpoint when the robot inevitably refuses to be boring.
+
+## 中文版
+
+[中文说明](imgs/readme_zh.md)
