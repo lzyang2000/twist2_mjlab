@@ -1,6 +1,7 @@
 # TWIST2 MJLab — 使用指南
 
 <div align="center">
+  <img src="hello.gif" alt="TWIST2 问候 gif" width="360" />
   <img src="example.gif" alt="TWIST2 动作跟踪示例" width="360" />
 </div>
 
