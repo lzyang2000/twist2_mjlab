@@ -16,7 +16,7 @@ The package loads motion references through a PKL motion library, so the normal 
 4. visualize with `play_twist2.sh`.
 
 ## TODOs
-- [ ] Add hardware deployment instructions and scripts that use the MJLab G1 definitions.
+- [ ] Add hardware deployment instructions and scripts that use the MJLab G1 definitions (gains, action scale, etc.).
 
 ## What’s in the package
 
@@ -76,21 +76,17 @@ Notes:
 
 - the first positional argument is the GPU id (`0` by default),
 - extra CLI flags are forwarded to MJLab’s `train` command,
-- training logs are written under `logs/rsl_rl/g1_twist2_flat/`, and
-- the W&B project is `twist2_mjlab`.
+- training logs are written under `logs/rsl_rl/g1_twist2_flat/`.
 
-Useful training environment variables:
-
-| Variable | Default | Purpose |
-|---|---:|---|
-| `TWIST2_MOTION_FILE` | required | Motion file passed to the task |
-| `TWIST2_NUM_ENVS` | `4096` | Number of parallel environments |
-| `TWIST2_VIDEO_INTERVAL` | `48000` | Video capture interval |
-| `TWIST2_VIDEO_LENGTH` | `500` | Video length in steps |
-
-#### Note: W&B setup and opt-out
+#### Note: W&B setup and what gets saved
 
 This package logs training runs to Weights & Biases by default.
+
+The W&B defaults for this task are:
+
+- project: `twist2_mjlab`
+- experiment name: `g1_twist2_flat`
+- run name: `g1_twist2_flat`
 
 Before your first run, authenticate with W&B:
 
@@ -100,11 +96,13 @@ wandb login
 
 You can also set the API key explicitly with `WANDB_API_KEY` if you prefer not to use the interactive login prompt.
 
-Default W&B values for this task:
+By default, W&B stores:
 
-- project: `twist2_mjlab`
-- experiment name: `g1_twist2_flat`
-- run name: `g1_twist2_flat`
+- training scalars such as episode statistics, losses, learning rate, action standard deviation, and FPS/performance
+- the training and environment configs (`agent.yaml` and `env.yaml`)
+- git state for the local repos used in the run, including commit hash, status, and diff
+- logged videos (`*.mp4`) found under the run directory
+- model checkpoints and exported policy files when `upload_model` is enabled, which is the default
 
 If you do not want W&B logging, switch the logger to TensorBoard when you launch training:
 
@@ -186,7 +184,8 @@ If you want to modify the task, these files are the main ones to look at:
 - **`No runs found` in play**: train at least once, or pass an explicit checkpoint path.
 - **Missing `body_pos_w` / `body_quat_w`**: rerun `enrich_pkl.py` on the raw PKLs.
 - **Unexpected log location**: run the scripts from `twist2_mjlab/` so the relative `logs/` path matches the project layout.
-
+- **Complaining about display, rendering, video**: set `--video False` in the training script.
+  
 ## One-line summary
 
 `twist2_mjlab` is the self-contained MJLab package for TWIST2 motion tracking on Unitree G1: enrich the PKLs, train with `Twist2-Flat-Unitree-G1`, then play the latest checkpoint when the robot inevitably refuses to be boring.
