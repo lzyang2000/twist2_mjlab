@@ -1,8 +1,8 @@
 # TWIST2 MJLab — Usage Guide
 
 <div align="center">
-    <img src="imgs/hello.gif" alt="TWIST2 hello gif" width="360" />
-  <img src="imgs/example.gif" alt="TWIST2 motion tracking example" width="360" />
+    <img src="resources/hello.gif" alt="TWIST2 hello gif" width="360" />
+  <img src="resources/example.gif" alt="TWIST2 motion tracking example" width="360" />
 </div>
 
 ## Overview
@@ -26,6 +26,12 @@ twist2_mjlab/
 ├── pyproject.toml              # MJLab task package + MJLab entry point
 ├── train_twist2.sh             # Train `Twist2-Flat-Unitree-G1`
 ├── play_twist2.sh              # Play the latest or a chosen checkpoint
+├── play_twist2_pretrained.sh   # Play with the checked-in pretrained checkpoint
+├── resources/
+│   ├── pretrained.pt           # Pretrained checkpoint (30K iterations)
+│   ├── hello.gif               # README demo asset
+│   ├── example.gif             # README demo asset
+│   └── readme_zh.md            # Chinese usage guide
 └── src/twist2_mjlab/
     ├── __init__.py             # Task registration
     ├── commands.py             # PKL motion command and resampling
@@ -45,7 +51,7 @@ twist2_mjlab/
 Run everything from `twist2_mjlab/`:
 
 ```bash
-cd /home/yangl/twist2/twist2_mjlab
+cd /path/to/twist2_mjlab
 uv sync
 ```
 
@@ -61,6 +67,8 @@ uv run python -m twist2_mjlab.scripts.enrich_pkl \
 ```
 
 This reads a dataset YAML, runs MuJoCo forward kinematics for each PKL, writes enriched PKLs with `body_pos_w` and `body_quat_w`, and saves a new `dataset.yaml` inside the output directory.
+
+**Note:** If you want to try playing first, this package already comes with a pretrained checkpoint at 30K iterations; just run `play_twist2_pretrained.sh` directly.
 
 ### 3) Train
 
@@ -126,6 +134,14 @@ You can also pass a checkpoint explicitly:
 ```bash
 TWIST2_MOTION_FILE=/path/to/enriched/dataset.yaml bash play_twist2.sh /path/to/model_12345.pt
 ```
+
+Or run the pretrained checkpoint script directly:
+
+```bash
+TWIST2_MOTION_FILE=/path/to/enriched/dataset.yaml bash play_twist2_pretrained.sh
+```
+
+Running `play_twist2_pretrained.sh` directly uses the pretrained checkpoint at 30K iterations.
 
 Notes:
 
@@ -193,4 +209,4 @@ If you want to modify the task, these files are the main ones to look at:
 
 ## 中文版
 
-[中文说明](imgs/readme_zh.md)
+[中文说明](resources/readme_zh.md)
