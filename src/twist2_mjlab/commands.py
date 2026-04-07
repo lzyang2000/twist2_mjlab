@@ -260,8 +260,12 @@ class PklMotionCommand(CommandTerm):
 	) -> None:
 		soft_limits = self.robot.data.soft_joint_pos_limits[env_ids]
 		joint_pos = torch.clip(joint_pos, soft_limits[:, :, 0], soft_limits[:, :, 1])
+		vel_factor = 0.8
+		joint_vel = joint_vel * vel_factor
 		self.robot.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=env_ids)
 
+		root_lin_vel = root_lin_vel * vel_factor
+		root_ang_vel = root_ang_vel * vel_factor
 		root_state = torch.cat([root_pos, root_ori, root_lin_vel, root_ang_vel], dim=-1)
 		self.robot.write_root_state_to_sim(root_state, env_ids=env_ids)
 		self.robot.reset(env_ids=env_ids)
