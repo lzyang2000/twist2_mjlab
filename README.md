@@ -1,5 +1,9 @@
 # TWIST2 MJLab — Usage Guide
 
+<div align="center">
+  <img src="imgs/example.gif" alt="TWIST2 motion tracking example" width="720" />
+</div>
+
 ## Overview
 
 `twist2_mjlab` is a standalone MJLab task package for Unitree G1 motion tracking based on [TWIST2](https://github.com/amazon-far/TWIST2) in order to enable further development on a supported physics engine (mjwarp) and training framework. The registered task is `Twist2-Flat-Unitree-G1`, and all task-specific logic lives locally under `src/twist2_mjlab/`.
@@ -10,6 +14,9 @@ The package loads motion references through a PKL motion library, so the normal 
 2. point the task at the resulting motion file,
 3. train with `train_twist2.sh`, and
 4. visualize with `play_twist2.sh`.
+
+## TODOs
+- [ ] Add hardware deployment instructions and scripts that use the MJLab G1 definitions.
 
 ## What’s in the package
 
@@ -43,7 +50,7 @@ uv sync
 
 ### 2) Prepare motion data
 
-`PklMotionLib` expects enriched PKLs. If you start from raw TWIST2 motions, run the enrichment script first:
+`PklMotionLib` expects PKLs that follows the format of BeyondMimic. If you start from raw [TWIST2 motions](https://drive.google.com/file/d/1JbW_InVD0ji5fvsR5kz7nbsXSXZQQXpd/view), run the enrichment script first:
 
 ```bash
 uv run python -m twist2_mjlab.scripts.enrich_pkl \
@@ -80,6 +87,32 @@ Useful training environment variables:
 | `TWIST2_NUM_ENVS` | `4096` | Number of parallel environments |
 | `TWIST2_VIDEO_INTERVAL` | `48000` | Video capture interval |
 | `TWIST2_VIDEO_LENGTH` | `500` | Video length in steps |
+
+#### Note: W&B setup and opt-out
+
+This package logs training runs to Weights & Biases by default.
+
+Before your first run, authenticate with W&B:
+
+```bash
+wandb login
+```
+
+You can also set the API key explicitly with `WANDB_API_KEY` if you prefer not to use the interactive login prompt.
+
+Default W&B values for this task:
+
+- project: `twist2_mjlab`
+- experiment name: `g1_twist2_flat`
+- run name: `g1_twist2_flat`
+
+If you do not want W&B logging, switch the logger to TensorBoard when you launch training:
+
+```bash
+TWIST2_MOTION_FILE=/path/to/enriched/dataset.yaml bash train_twist2.sh 0 --agent.logger tensorboard
+```
+
+If you only want to disable W&B at the environment level, you can also set `WANDB_MODE=disabled`.
 
 ### 4) Play / visualize
 
