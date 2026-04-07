@@ -182,7 +182,12 @@ def _twist2_reward_cfg() -> dict[str, RewardTermCfg]:
   return rewards
 
 
-def _twist2_termination_cfg() -> dict[str, TerminationTermCfg]:
+def _twist2_termination_cfg(*, play: bool = False) -> dict[str, TerminationTermCfg]:
+  if play:
+    return {
+      "time_out": TerminationTermCfg(func=env_mdp.time_out, time_out=True),
+    }
+
   return {
     "time_out": TerminationTermCfg(func=env_mdp.time_out, time_out=True),
     "motion_end": TerminationTermCfg(
@@ -483,6 +488,6 @@ def unitree_g1_twist2_flat_env_cfg(
 
   _apply_twist2_domain_rand(cfg, play=play)
   cfg.rewards = _twist2_reward_cfg()
-  cfg.terminations = _twist2_termination_cfg()
+  cfg.terminations = _twist2_termination_cfg(play=play)
   _set_default_num_envs(cfg, play=play)
   return cfg
