@@ -190,21 +190,25 @@ TWIST2_MOTION_FILE=/path/to/enriched/motion.pkl \
 
 **How it works:**
 
-The pipeline decouples physics simulation from neural network inference so they can run independently (and later on different machines or hardware):
+The pipeline decouples physics simulation from neural network inference into two fully independent real-time processes, mirroring how a real robot works — actuators hold the last command while the next one is being computed:
 
 ```
-sim_node (MuJoCo)                 policy_node (ONNX)
-  Step physics                      Load motion library (PKL)
-  Pack robot state ──UDP 50Hz──>    Build observations:
-                                      mimic (35D) from motion ref
-                                      proprio (92D) from robot state
-                                      history (11 × 127D)
-  Apply joint targets <──UDP────    Run ONNX inference → 29D action
-  Render viewer + green ghost       Send action + reference pose
+sim_node (MuJoCo, 1000 Hz)        policy_node (ONNX, 50 Hz)
+  Own real-time clock                Own real-time clock
+  Step physics (20 × 0.001s)        Load motion library (PKL)
+  Pack robot state ──UDP──>          Drain to latest state
+                                     Build observations:
+                                       mimic (35D) from motion ref
+                                       proprio (92D) from robot state
+                                       history (11 × 127D)
+  Drain to latest action <──UDP──   Run ONNX inference → 29D action
+  Hold last action if none arrived   Send action + reference pose
+  Render viewer + green ghost
 ```
 
-- The **sim node** (`deploy/sim/sim_node.py`) builds a MuJoCo G1 model, runs 1000 Hz physics with 20x decimation (50 Hz control), and renders the robot alongside a green ghost of the reference motion. It never blocks on the policy — if no new action arrives, the actuators hold the previous command, just like real hardware.
-- The **policy node** (`deploy/policy/twist2_policy.py`) loads the motion library to construct the 35D mimic observation (reference joint positions + root state), maintains an 11-frame observation history, and runs the exported ONNX actor network. It runs its own independent 50 Hz real-time clock.
+- Both processes run their own independent real-time clocks. Neither ever blocks on the other — UDP is fire-and-forget. If either side is momentarily slow, the other keeps running with the latest available data.
+- The **sim node** (`deploy/sim/sim_node.py`) runs MuJoCo G1 physics at 1000 Hz (timestep 0.001s, 20x decimation → 50 Hz control rate). Each control cycle it sends state and drains any new action from the policy. If no new action has arrived, `data.ctrl` holds the previous command — exactly like real actuators.
+- The **policy node** (`deploy/policy/twist2_policy.py`) runs at 50 Hz. It loads the motion library to construct the 35D mimic observation (reference joint positions + root state), maintains an 11-frame observation history, and runs the exported ONNX actor network.
 - Each motion plays with a **3-second blend-in** from the default standing pose and a **3-second blend-out** back to standing, then loops.
 - The green ghost orientation is corrected to always start facing the +X direction.
 
