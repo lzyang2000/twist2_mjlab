@@ -201,7 +201,7 @@ sim_node (MuJoCo, 1000 Hz)        policy_node (ONNX, 50 Hz)
                                        mimic (35D) from motion ref
                                        proprio (92D) from robot state
                                        history (11 × 127D)
-  Drain to latest action <──50Hz──   Run ONNX inference → 29D action
+  Drain to latest action <──50Hz UDP──  Run ONNX inference → 29D action
   Hold last action if none arrived   Send action + reference pose
   Render viewer + green ghost
 ```

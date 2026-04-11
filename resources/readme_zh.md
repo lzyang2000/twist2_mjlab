@@ -201,7 +201,7 @@ sim_node (MuJoCo, 1000 Hz)        policy_node (ONNX, 50 Hz)
                                        mimic (35D) 来自动作参考
                                        proprio (92D) 来自机器人状态
                                        history (11 × 127D)
-  获取最新动作 <──50Hz──              运行 ONNX 推理 → 29D 动作
+  获取最新动作 <──50Hz UDP──           运行 ONNX 推理 → 29D 动作
   无新动作则保持上一条指令             发送动作 + 参考姿态
   渲染查看器 + 绿色影子
 ```
