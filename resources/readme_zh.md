@@ -17,6 +17,7 @@
 4. 使用 `play_twist2.sh` 可视化。
 
 ## TODO
+- [x] 解耦式 sim2sim 流水线（sim 节点 + policy 节点通过 UDP 50 Hz 通信，实时 MuJoCo 查看器带参考动作绿色影子叠加）。
 - [ ] 添加硬件部署说明，以及使用 MJLab G1 定义（增益、动作缩放等）的脚本。
 
 ## 包含内容
@@ -27,11 +28,19 @@ twist2_mjlab/
 ├── train_twist2.sh             # 训练 `Twist2-Flat-Unitree-G1`
 ├── play_twist2.sh              # 播放最新或指定检查点
 ├── play_twist2_pretrained.sh   # 直接播放内置的预训练检查点
+├── sim2sim_pretrained.sh       # 一键启动预训练模型 sim2sim
 ├── resources/
 │   ├── pretrained.pt           # 预训练检查点（30K iterations）
+│   ├── pretrained.onnx         # 预训练 ONNX 模型（用于 sim2sim）
 │   ├── hello.gif               # README 演示资源
 │   ├── example.gif             # README 演示资源
 │   └── readme_zh.md            # 中文使用说明
+├── deploy/                     # Sim2sim 部署流水线
+│   ├── play_sim_twist2.sh      # 启动脚本
+│   ├── export_onnx.py          # 检查点 -> ONNX 导出
+│   ├── common/udp_sync.py      # UDP 状态/动作协议
+│   ├── sim/sim_node.py         # MuJoCo 物理仿真 + 参考动作半透明绿色叠加
+│   └── policy/twist2_policy.py # ONNX 推理 + 动作库
 └── src/twist2_mjlab/
     ├── __init__.py             # 任务注册
     ├── commands.py             # PKL 动作命令与重采样
@@ -148,6 +157,64 @@ TWIST2_MOTION_FILE=/path/to/enriched/dataset.yaml bash play_twist2_pretrained.sh
 - play 脚本默认使用 `--device cpu` 和 `--viewer native`，
 - 额外的 CLI 参数会继续传递给 MJLab 的 `play` 命令，
 - 如果没有设置 `TWIST2_MOTION_FILE` 且终端是交互式的，脚本会提示输入。
+
+### 5) Sim2sim 部署
+
+sim2sim 流水线采用解耦的双进程架构运行训练好的策略：**sim 节点**（MuJoCo 物理仿真 + 查看器）和 **policy 节点**（ONNX 推理 + 动作库），通过 UDP 以 50 Hz 通信。查看器中会显示一个半透明的绿色"影子"机器人，表示策略正在跟踪的参考动作。
+
+**最快体验——使用预训练模型：**
+
+```bash
+bash sim2sim_pretrained.sh
+```
+
+这会使用内置的 ONNX 模型和示例动作片段，无需训练或导出步骤。
+
+**使用自己训练的检查点：**
+
+传入 `.pt` 检查点（自动导出为 ONNX）或直接传入 `.onnx` 文件：
+
+```bash
+# 从 .pt 检查点启动（自动导出 ONNX）
+TWIST2_MOTION_FILE=/path/to/enriched/motion.pkl \
+  ./deploy/play_sim_twist2.sh /path/to/model_29999.pt
+
+# 从已导出的 .onnx 启动
+TWIST2_MOTION_FILE=/path/to/enriched/motion.pkl \
+  ./deploy/play_sim_twist2.sh /path/to/model.onnx
+
+# 不传模型参数：自动从 logs/ 选择最新检查点
+TWIST2_MOTION_FILE=/path/to/enriched/motion.pkl \
+  ./deploy/play_sim_twist2.sh
+```
+
+**工作原理：**
+
+该流水线将物理仿真与神经网络推理解耦，使两者可以独立运行（后续也可以部署到不同的机器或硬件上）：
+
+```
+sim_node (MuJoCo)                 policy_node (ONNX)
+  步进物理仿真                       加载动作库 (PKL)
+  打包机器人状态 ──UDP 50Hz──>       构建观测：
+                                      mimic (35D) 来自动作参考
+                                      proprio (92D) 来自机器人状态
+                                      history (11 × 127D)
+  应用关节目标 <──UDP────            运行 ONNX 推理 → 29D 动作
+  渲染查看器 + 绿色影子               发送动作 + 参考姿态
+```
+
+- **sim 节点** (`deploy/sim/sim_node.py`) 构建 MuJoCo G1 模型，以 200 Hz 物理仿真、4 倍降采样（50 Hz 控制频率）运行，并在机器人旁边渲染参考动作的绿色半透明影子。
+- **policy 节点** (`deploy/policy/twist2_policy.py`) 加载动作库以构建 35D mimic 观测（参考关节位置 + 根状态），维护 11 帧的观测历史，并运行导出的 ONNX actor 网络。
+- 每段动作播放时会有 **3 秒的渐入**（从默认站立姿态过渡）和 **3 秒的渐出**（过渡回站立姿态），然后循环。
+- 绿色影子的朝向会被校正为始终面向 +X 方向。
+
+**环境变量：**
+
+| 变量 | 说明 |
+|------|------|
+| `TWIST2_MOTION_FILE` | 补全后的 `.pkl` 或 dataset `.yaml` 的路径（必填） |
+| `TWIST2_MOTION_INDEX` | 多动作数据集中要播放的动作索引（默认 `0`） |
+| `TWIST2_INIT_YAW_DEG` | 机器人初始偏航角，单位度（默认 `0`） |
 
 ## 动作文件格式
 

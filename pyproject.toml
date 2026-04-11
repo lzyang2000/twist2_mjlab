@@ -10,6 +10,7 @@ requires-python = "==3.10.*"
 dependencies = [
   "mjlab",
   "torch==2.8.0",
+  "onnxruntime",
 ]
 
 [project.entry-points."mjlab.tasks"]

@@ -17,6 +17,7 @@ The package loads motion references through a PKL motion library, so the normal 
 4. visualize with `play_twist2.sh`.
 
 ## TODOs
+- [x] Decoupled sim2sim pipeline (sim node + policy node over UDP at 50 Hz, real-time MuJoCo viewer with ghost overlay).
 - [ ] Add hardware deployment instructions and scripts that use the MJLab G1 definitions (gains, action scale, etc.).
 
 ## What’s in the package
@@ -27,11 +28,19 @@ twist2_mjlab/
 ├── train_twist2.sh             # Train `Twist2-Flat-Unitree-G1`
 ├── play_twist2.sh              # Play the latest or a chosen checkpoint
 ├── play_twist2_pretrained.sh   # Play with the checked-in pretrained checkpoint
+├── sim2sim_pretrained.sh       # One-line sim2sim with pretrained ONNX
 ├── resources/
 │   ├── pretrained.pt           # Pretrained checkpoint (30K iterations)
+│   ├── pretrained.onnx         # Pretrained ONNX model (for sim2sim)
 │   ├── hello.gif               # README demo asset
 │   ├── example.gif             # README demo asset
 │   └── readme_zh.md            # Chinese usage guide
+├── deploy/                     # Sim2sim deployment pipeline
+│   ├── play_sim_twist2.sh      # Orchestration script
+│   ├── export_onnx.py          # Checkpoint -> ONNX export
+│   ├── common/udp_sync.py      # UDP state/action protocol
+│   ├── sim/sim_node.py         # MuJoCo physics + ghost overlay viewer
+│   └── policy/twist2_policy.py # ONNX inference + motion library
 └── src/twist2_mjlab/
     ├── __init__.py             # Task registration
     ├── commands.py             # PKL motion command and resampling
@@ -148,6 +157,64 @@ Notes:
 - the play script defaults to `--device cpu` and `--viewer native`,
 - extra CLI flags are forwarded to MJLab’s `play` command, and
 - the script prompts for `TWIST2_MOTION_FILE` if it is not set and the terminal is interactive.
+
+### 5) Sim2sim deployment
+
+The sim2sim pipeline runs the trained policy in a decoupled two-process architecture: a **sim node** (MuJoCo physics + viewer) and a **policy node** (ONNX inference + motion library), communicating over UDP at 50 Hz. A semi-transparent green ghost shows the reference motion the policy is tracking.
+
+**Quickest way — pretrained model:**
+
+```bash
+bash sim2sim_pretrained.sh
+```
+
+This uses the bundled ONNX model and a sample motion clip; no training or export step needed.
+
+**With your own checkpoint:**
+
+Pass a `.pt` checkpoint (auto-exports to ONNX) or a `.onnx` file directly:
+
+```bash
+# From a .pt checkpoint (exports ONNX automatically)
+TWIST2_MOTION_FILE=/path/to/enriched/motion.pkl \
+  ./deploy/play_sim_twist2.sh /path/to/model_29999.pt
+
+# From a pre-exported .onnx
+TWIST2_MOTION_FILE=/path/to/enriched/motion.pkl \
+  ./deploy/play_sim_twist2.sh /path/to/model.onnx
+
+# No model arg: auto-selects the latest checkpoint from logs/
+TWIST2_MOTION_FILE=/path/to/enriched/motion.pkl \
+  ./deploy/play_sim_twist2.sh
+```
+
+**How it works:**
+
+The pipeline decouples physics simulation from neural network inference so they can run independently (and later on different machines or hardware):
+
+```
+sim_node (MuJoCo)                 policy_node (ONNX)
+  Step physics                      Load motion library (PKL)
+  Pack robot state ──UDP 50Hz──>    Build observations:
+                                      mimic (35D) from motion ref
+                                      proprio (92D) from robot state
+                                      history (11 × 127D)
+  Apply joint targets <──UDP────    Run ONNX inference → 29D action
+  Render viewer + green ghost       Send action + reference pose
+```
+
+- The **sim node** (`deploy/sim/sim_node.py`) builds a MuJoCo G1 model, runs 200 Hz physics with 4x decimation (50 Hz control), and renders the robot alongside a green ghost of the reference motion.
+- The **policy node** (`deploy/policy/twist2_policy.py`) loads the motion library to construct the 35D mimic observation (reference joint positions + root state), maintains an 11-frame observation history, and runs the exported ONNX actor network.
+- Each motion plays with a **3-second blend-in** from the default standing pose and a **3-second blend-out** back to standing, then loops.
+- The green ghost orientation is corrected to always start facing the +X direction.
+
+**Environment variables:**
+
+| Variable | Description |
+|----------|-------------|
+| `TWIST2_MOTION_FILE` | Path to an enriched `.pkl` or a dataset `.yaml` (required) |
+| `TWIST2_MOTION_INDEX` | Index of the motion to play from a multi-motion dataset (default `0`) |
+| `TWIST2_INIT_YAW_DEG` | Initial robot yaw in degrees (default `0`) |
 
 ## Motion file format
 
