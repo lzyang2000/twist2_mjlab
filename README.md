@@ -196,12 +196,12 @@ The pipeline decouples physics simulation from neural network inference into two
 sim_node (MuJoCo, 1000 Hz)        policy_node (ONNX, 50 Hz)
   Own real-time clock                Own real-time clock
   Step physics (20 × 0.001s)        Load motion library (PKL)
-  Pack robot state ──UDP──>          Drain to latest state
+  Pack robot state ──50Hz UDP──>     Drain to latest state (50 Hz)
                                      Build observations:
                                        mimic (35D) from motion ref
                                        proprio (92D) from robot state
                                        history (11 × 127D)
-  Drain to latest action <──UDP──   Run ONNX inference → 29D action
+  Drain to latest action <──50Hz──   Run ONNX inference → 29D action
   Hold last action if none arrived   Send action + reference pose
   Render viewer + green ghost
 ```

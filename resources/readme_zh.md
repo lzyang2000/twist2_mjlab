@@ -196,12 +196,12 @@ TWIST2_MOTION_FILE=/path/to/enriched/motion.pkl \
 sim_node (MuJoCo, 1000 Hz)        policy_node (ONNX, 50 Hz)
   独立实时时钟                        独立实时时钟
   步进物理 (20 × 0.001s)             加载动作库 (PKL)
-  打包机器人状态 ──UDP──>             获取最新状态
+  打包机器人状态 ──50Hz UDP──>        获取最新状态 (50 Hz)
                                      构建观测：
                                        mimic (35D) 来自动作参考
                                        proprio (92D) 来自机器人状态
                                        history (11 × 127D)
-  获取最新动作 <──UDP──              运行 ONNX 推理 → 29D 动作
+  获取最新动作 <──50Hz──              运行 ONNX 推理 → 29D 动作
   无新动作则保持上一条指令             发送动作 + 参考姿态
   渲染查看器 + 绿色影子
 ```
