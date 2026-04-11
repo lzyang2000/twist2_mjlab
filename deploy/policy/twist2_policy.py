@@ -15,6 +15,7 @@ import argparse
 import math
 import re
 import socket
+import time
 from collections import deque
 
 import numpy as np
@@ -385,16 +386,33 @@ def main():
     sim_addr = (UDP_HOST, UDP_SIM_PORT)
     print(f"TWIST2 policy UDP: listening on {UDP_HOST}:{UDP_POLICY_PORT}")
 
+    next_tick = time.perf_counter()
+
     try:
         while True:
-            # 1. Receive state
+            # Real-time 50 Hz pacing
+            now = time.perf_counter()
+            sleep_time = next_tick - now
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+            next_tick += dt
+
+            # 1. Receive state (drain to latest)
+            latest_data = None
+            sock.setblocking(False)
             try:
-                data, _ = sock.recvfrom(STATE_BYTES + 64)
-            except socket.timeout:
+                while True:
+                    latest_data, _ = sock.recvfrom(STATE_BYTES + 64)
+            except BlockingIOError:
+                pass
+            sock.setblocking(True)
+            sock.settimeout(1.0)
+
+            if latest_data is None:
                 continue
 
             step_id, root_quat, root_pos, body_lin_vel, body_ang_vel, \
-                joint_pos, joint_vel = unpack_state(data)
+                joint_pos, joint_vel = unpack_state(latest_data)
 
             # 2. Build observation
             mimic, ref_root_pos, ref_root_quat, ref_joint_pos = (

@@ -42,7 +42,7 @@ POLICY_JOINT_NAMES = [
     "right_elbow_joint", "right_wrist_roll_joint", "right_wrist_pitch_joint", "right_wrist_yaw_joint",
 ]
 
-DECIMATION = 4
+DECIMATION = 20  # 1000 Hz physics / 50 Hz control
 TWIST2_G1_XML_ENV = "TWIST2_MJLAB_G1_XML"
 
 
@@ -89,7 +89,7 @@ def build_model():
         return Entity(robot_cfg).spec.compile()
 
     spec = mujoco.MjSpec()
-    spec.option.timestep = 0.005
+    spec.option.timestep = 0.001
     spec.option.solver = mujoco.mjtSolver.mjSOL_NEWTON
     spec.option.gravity[:] = [0.0, 0.0, -9.81]
 
@@ -193,14 +193,20 @@ def main():
         mujoco.mj_forward(model, data)
         print("Simulation reset.")
 
-    # Viewer + real-time loop
+    # Hardware-like real-time loop.
+    # Both sim and policy run their own 50 Hz clocks independently.
+    # The sim never blocks on the policy — if no new action arrives,
+    # data.ctrl holds the previous command (just like real actuators).
+    # Physics runs at 1000 Hz (20 × 0.001s per control cycle).
     print("Launching MuJoCo viewer...")
+    udp_sock.setblocking(False)
+
     with mujoco.viewer.launch_passive(model, data) as viewer:
         start_wall = time.perf_counter() - data.time
         prev_sim_time = data.time
 
         while viewer.is_running():
-            # Real-time pacing
+            # Real-time pacing at control rate
             target_wall = start_wall + data.time + control_dt
             sleep_time = target_wall - time.perf_counter()
             if sleep_time > 0:
@@ -233,27 +239,25 @@ def main():
                 policy_addr,
             )
 
-            # Recv action + reference pose via UDP
-            ref_root_pos = ref_root_quat = ref_joint_pos = None
+            # Non-blocking: drain to latest action (hold previous if none)
+            latest_action = None
             try:
-                action_data, _ = udp_sock.recvfrom(ACTION_BYTES + 64)
-                _, target_pos, ref_root_pos, ref_root_quat, ref_joint_pos = (
-                    unpack_action(action_data)
-                )
-                data.ctrl[ctrl_idx] = target_pos
-            except socket.timeout:
+                while True:
+                    latest_action, _ = udp_sock.recvfrom(ACTION_BYTES + 64)
+            except BlockingIOError:
                 pass
 
-            # Step physics
-            for _ in range(DECIMATION):
-                mujoco.mj_step(model, data)
+            if latest_action is not None:
+                _, target_pos, ref_root_pos, ref_root_quat, ref_joint_pos = (
+                    unpack_action(latest_action)
+                )
+                data.ctrl[ctrl_idx] = target_pos
 
-            # Render ghost overlay of reference motion
-            if ref_root_pos is not None:
+                # Update ghost overlay
                 ghost_data.qpos[:] = 0
-                ghost_data.qpos[0:3] = ref_root_pos      # root position
-                ghost_data.qpos[3:7] = ref_root_quat      # root quaternion (wxyz)
-                ghost_data.qpos[qpos_idx] = ref_joint_pos  # joint positions
+                ghost_data.qpos[0:3] = ref_root_pos
+                ghost_data.qpos[3:7] = ref_root_quat
+                ghost_data.qpos[qpos_idx] = ref_joint_pos
                 mujoco.mj_forward(ghost_model, ghost_data)
 
                 with viewer.lock():
@@ -262,6 +266,10 @@ def main():
                         ghost_model, ghost_data, ghost_vopt, ghost_pert,
                         mujoco.mjtCatBit.mjCAT_ALL.value, viewer.user_scn,
                     )
+
+            # Step physics (20 × 0.001s = 0.02s per control cycle)
+            for _ in range(DECIMATION):
+                mujoco.mj_step(model, data)
 
             prev_sim_time = data.time
             step_count += 1

@@ -160,7 +160,7 @@ Notes:
 
 ### 5) Sim2sim deployment
 
-The sim2sim pipeline runs the trained policy in a decoupled two-process architecture: a **sim node** (MuJoCo physics + viewer) and a **policy node** (ONNX inference + motion library), communicating over UDP at 50 Hz. A semi-transparent green ghost shows the reference motion the policy is tracking.
+The sim2sim pipeline runs the trained policy in a hardware-like decoupled two-process architecture: a **sim node** (MuJoCo physics + viewer) and a **policy node** (ONNX inference + motion library), communicating asynchronously over UDP. Both processes run their own real-time clocks independently — if the policy is slow, the sim keeps running with the last command, just like real actuators. A semi-transparent green ghost shows the reference motion the policy is tracking.
 
 **Quickest way — pretrained model:**
 
@@ -203,8 +203,8 @@ sim_node (MuJoCo)                 policy_node (ONNX)
   Render viewer + green ghost       Send action + reference pose
 ```
 
-- The **sim node** (`deploy/sim/sim_node.py`) builds a MuJoCo G1 model, runs 200 Hz physics with 4x decimation (50 Hz control), and renders the robot alongside a green ghost of the reference motion.
-- The **policy node** (`deploy/policy/twist2_policy.py`) loads the motion library to construct the 35D mimic observation (reference joint positions + root state), maintains an 11-frame observation history, and runs the exported ONNX actor network.
+- The **sim node** (`deploy/sim/sim_node.py`) builds a MuJoCo G1 model, runs 1000 Hz physics with 20x decimation (50 Hz control), and renders the robot alongside a green ghost of the reference motion. It never blocks on the policy — if no new action arrives, the actuators hold the previous command, just like real hardware.
+- The **policy node** (`deploy/policy/twist2_policy.py`) loads the motion library to construct the 35D mimic observation (reference joint positions + root state), maintains an 11-frame observation history, and runs the exported ONNX actor network. It runs its own independent 50 Hz real-time clock.
 - Each motion plays with a **3-second blend-in** from the default standing pose and a **3-second blend-out** back to standing, then loops.
 - The green ghost orientation is corrected to always start facing the +X direction.
 

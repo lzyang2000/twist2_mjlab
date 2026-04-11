@@ -160,7 +160,7 @@ TWIST2_MOTION_FILE=/path/to/enriched/dataset.yaml bash play_twist2_pretrained.sh
 
 ### 5) Sim2sim 部署
 
-sim2sim 流水线采用解耦的双进程架构运行训练好的策略：**sim 节点**（MuJoCo 物理仿真 + 查看器）和 **policy 节点**（ONNX 推理 + 动作库），通过 UDP 以 50 Hz 通信。查看器中会显示一个半透明的绿色"影子"机器人，表示策略正在跟踪的参考动作。
+sim2sim 流水线采用类硬件的解耦双进程架构运行训练好的策略：**sim 节点**（MuJoCo 物理仿真 + 查看器）和 **policy 节点**（ONNX 推理 + 动作库），通过 UDP 异步通信。两个进程各自维护独立的实时时钟——如果 policy 稍慢，sim 会继续使用上一条指令运行，就像真实执行器一样。查看器中会显示一个半透明的绿色"影子"机器人，表示策略正在跟踪的参考动作。
 
 **最快体验——使用预训练模型：**
 
@@ -203,8 +203,8 @@ sim_node (MuJoCo)                 policy_node (ONNX)
   渲染查看器 + 绿色影子               发送动作 + 参考姿态
 ```
 
-- **sim 节点** (`deploy/sim/sim_node.py`) 构建 MuJoCo G1 模型，以 200 Hz 物理仿真、4 倍降采样（50 Hz 控制频率）运行，并在机器人旁边渲染参考动作的绿色半透明影子。
-- **policy 节点** (`deploy/policy/twist2_policy.py`) 加载动作库以构建 35D mimic 观测（参考关节位置 + 根状态），维护 11 帧的观测历史，并运行导出的 ONNX actor 网络。
+- **sim 节点** (`deploy/sim/sim_node.py`) 构建 MuJoCo G1 模型，以 1000 Hz 物理仿真、20 倍降采样（50 Hz 控制频率）运行，并在机器人旁边渲染参考动作的绿色半透明影子。它不会阻塞等待 policy——如果没有新动作到达，执行器保持上一条指令，和真实硬件行为一致。
+- **policy 节点** (`deploy/policy/twist2_policy.py`) 加载动作库以构建 35D mimic 观测（参考关节位置 + 根状态），维护 11 帧的观测历史，并运行导出的 ONNX actor 网络。它拥有独立的 50 Hz 实时时钟。
 - 每段动作播放时会有 **3 秒的渐入**（从默认站立姿态过渡）和 **3 秒的渐出**（过渡回站立姿态），然后循环。
 - 绿色影子的朝向会被校正为始终面向 +X 方向。
 
