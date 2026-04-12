@@ -218,27 +218,6 @@ def main():
                 step_count = 0
                 start_wall = time.perf_counter() - data.time
 
-            # Pack & send state via UDP
-            root_quat = data.qpos[3:7].astype(np.float32)
-            root_pos = data.qpos[0:3].astype(np.float32)
-            cvel = data.cvel[pelvis_body_id]
-            ang_vel_w = cvel[0:3].astype(np.float32)
-            lin_vel_c = cvel[3:6].astype(np.float32)
-            pos_f = data.xpos[pelvis_body_id].astype(np.float32)
-            stcom = data.subtree_com[pelvis_body_id].astype(np.float32)
-            lin_vel_w = lin_vel_c - np.cross(ang_vel_w, stcom - pos_f)
-            body_ang_vel = quat_rotate_inverse(root_quat, ang_vel_w)
-            body_lin_vel = quat_rotate_inverse(root_quat, lin_vel_w)
-            joint_pos = data.qpos[qpos_idx].astype(np.float32)
-            joint_vel = data.qvel[qvel_idx].astype(np.float32)
-
-            udp_sock.sendto(
-                pack_state(step_count, root_quat, root_pos,
-                           body_lin_vel, body_ang_vel,
-                           joint_pos, joint_vel),
-                policy_addr,
-            )
-
             # Non-blocking: drain to latest action (hold previous if none)
             latest_action = None
             try:
@@ -270,6 +249,27 @@ def main():
             # Step physics (20 × 0.001s = 0.02s per control cycle)
             for _ in range(DECIMATION):
                 mujoco.mj_step(model, data)
+
+            # Pack & send fresh post-step state via UDP
+            root_quat = data.qpos[3:7].astype(np.float32)
+            root_pos = data.qpos[0:3].astype(np.float32)
+            cvel = data.cvel[pelvis_body_id]
+            ang_vel_w = cvel[0:3].astype(np.float32)
+            lin_vel_c = cvel[3:6].astype(np.float32)
+            pos_f = data.xpos[pelvis_body_id].astype(np.float32)
+            stcom = data.subtree_com[pelvis_body_id].astype(np.float32)
+            lin_vel_w = lin_vel_c - np.cross(ang_vel_w, stcom - pos_f)
+            body_ang_vel = quat_rotate_inverse(root_quat, ang_vel_w)
+            body_lin_vel = quat_rotate_inverse(root_quat, lin_vel_w)
+            joint_pos = data.qpos[qpos_idx].astype(np.float32)
+            joint_vel = data.qvel[qvel_idx].astype(np.float32)
+
+            udp_sock.sendto(
+                pack_state(step_count, root_quat, root_pos,
+                           body_lin_vel, body_ang_vel,
+                           joint_pos, joint_vel),
+                policy_addr,
+            )
 
             prev_sim_time = data.time
             step_count += 1
