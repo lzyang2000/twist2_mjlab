@@ -9,12 +9,13 @@
 
 `twist2_mjlab` 是一个独立的 MJLab 任务包，用于基于 [TWIST2](https://github.com/amazon-far/TWIST2) 的 Unitree G1 动作跟踪，目的是在受支持的物理引擎（mjwarp）和训练框架上继续开发。注册的任务名称是 `Twist2-Flat-Unitree-G1`，所有任务相关逻辑都保存在本地的 `src/twist2_mjlab/` 下。
 
-该包通过 PKL 动作库加载动作参考，因此标准流程如下：
+该包通过 PKL 动作库加载动作参考，现在支持两条彼此独立的流程。你可以只用其中一条，也可以两条都用，取决于你要使用哪个数据集：
 
-1. 使用 MuJoCo 前向运动学补全原始 TWIST2 PKL 文件（主要是为了兼容 MJLab 动作跟踪任务的原始 motion commands），
-2. 将任务指向生成后的动作文件，
-3. 使用 `train_twist2.sh` 训练，
-4. 使用 `play_twist2.sh` 可视化。
+1. TWIST2：使用 MuJoCo 前向运动学补全原始 TWIST2 PKL 文件，
+2. SEED：把 SEED 数据集里的 G1 CSV 动作转换成补全后的 TWIST2 PKL，
+3. 将任务指向生成后的动作文件或 dataset YAML，
+4. 使用 `train_twist2.sh` 或 `train_seed.sh` 训练，
+5. 使用 `play_twist2.sh` 或 `play_seed.sh` 可视化。
 
 ## TODO
 - [x] 解耦式 sim2sim 流水线（sim 节点 + policy 节点通过 UDP 50 Hz 通信，实时 MuJoCo 查看器带参考动作绿色影子叠加）。
@@ -26,12 +27,19 @@
 twist2_mjlab/
 ├── pyproject.toml              # MJLab 任务包 + MJLab 入口点
 ├── train_twist2.sh             # 训练 `Twist2-Flat-Unitree-G1`
+├── train_seed.sh               # 训练补全后的 SEED G1 数据集
 ├── play_twist2.sh              # 播放最新或指定检查点
 ├── play_twist2_pretrained.sh   # 直接播放内置的预训练检查点
+├── play_seed.sh                # 播放最新或指定的 SEED 检查点
+├── play_seed_pretrained.sh     # 直接播放内置的 SEED 预训练检查点
 ├── sim2sim_pretrained.sh       # 一键启动预训练模型 sim2sim
+├── sim2sim_seed.sh             # SEED 版本的一键 sim2sim
+├── sim2sim_seed_pretrained.sh  # 使用 SEED 预训练 ONNX 的一键 sim2sim
 ├── resources/
 │   ├── pretrained.pt           # 预训练检查点（30K iterations）
 │   ├── pretrained.onnx         # 预训练 ONNX 模型（用于 sim2sim）
+│   ├── pretrained_seed.pt      # SEED 预训练检查点（30K iterations）
+│   ├── pretrained_seed.onnx    # SEED 预训练 ONNX 模型（用于 sim2sim）
 │   ├── hello.gif               # README 演示资源
 │   ├── example.gif             # README 演示资源
 │   └── readme_zh.md            # 中文使用说明
@@ -75,26 +83,63 @@ uv run python -m twist2_mjlab.scripts.enrich_pkl \
   --workers 8
 ```
 
-该脚本会读取 dataset YAML，为每个 PKL 运行 MuJoCo 前向运动学，写出包含 `body_pos_w` 和 `body_quat_w` 的补全版 PKL，并在输出目录中保存新的 `dataset.yaml`。
+该脚本会读取 dataset YAML，为每个 PKL 运行 MuJoCo 前向运动学，写出包含 `body_pos_w` 和 `body_quat_w` 的补全版 PKL，并在输出目录中生成新的 `dataset.yaml`。
+
+#### SEED 数据集支持
+
+仓库里还提供了面向 Hugging Face 数据集 [`bones-studio/seed`](https://huggingface.co/datasets/bones-studio/seed) 的专用 SEED 流程。访问前需要先在 Hugging Face 页面接受数据集条款。这个流程是可选的；你可以只用 TWIST2 流程、只用 SEED 流程，或者两个都用。
+
+SEED 补全脚本需要 G1 CSV 动作文件和 metadata CSV。`seed_enrich.py` 的默认路径是：
+
+- `~/twist2/seed/g1/csv`
+- `~/twist2/seed/seed_metadata_v003.csv`
+
+如果你沿用 Hugging Face 的目录结构，可以显式传 `--metadata`，或者把 `metadata/seed_metadata_v003.csv` 复制 / 软链接到默认位置。
+
+把 SEED G1 CSV 转成补全后的 PKL 和 dataset YAML：
+
+```bash
+uv run python -m twist2_mjlab.scripts.seed_enrich \
+  --csv-dir ~/twist2/seed/g1/csv \
+  --metadata ~/twist2/seed/metadata/seed_metadata_v003.csv \
+  --output-dir ~/twist2/seed_g1_enriched_pkl \
+  --fps 30 \
+  --workers 8
+```
+
+这会把补全后的 PKL 写到 `~/twist2/seed_g1_enriched_pkl/`，并生成：
+
+- `seed_dataset.yaml` —— 全部动作
+- `seed_dataset_filtered.yaml` —— 过滤后的动作
+
+如果你已经把 metadata CSV 放到了默认路径 `~/twist2/seed/seed_metadata_v003.csv`，那就可以省略 `--metadata`。
 
 **注意:** 如果你想先直接体验一下，这个包已经自带了一个训练到 30K iterations 的预训练 checkpoint，直接运行 `play_twist2_pretrained.sh` 即可。
 
 ### 3) 训练
 
-通过 `TWIST2_MOTION_FILE` 指定动作文件。它可以是：
-
-- 单个补全后的 `.pkl`，或
-- 包含多个动作的 dataset `.yaml`。
+对于原始 TWIST2 动作，`TWIST2_MOTION_FILE` 可以指向单个补全后的 `.pkl`，也可以指向包含多个动作的 dataset `.yaml`：
 
 ```bash
 TWIST2_MOTION_FILE=/path/to/enriched/dataset.yaml bash train_twist2.sh 0
+```
+
+对于 SEED 流程，`train_seed.sh` 默认使用 `seed_enrich.py` 的输出：
+
+```bash
+bash train_seed.sh 0
 ```
 
 说明：
 
 - 第一个位置参数是 GPU 编号（默认是 `0`），
 - 额外的 CLI 参数会继续传递给 MJLab 的 `train` 命令，
-- 训练日志会写入 `logs/rsl_rl/g1_twist2_flat/`。
+- `train_twist2.sh` 的训练日志会写入 `logs/rsl_rl/g1_twist2_flat/`，
+- `train_seed.sh` 的训练日志会写入 `logs/rsl_rl/g1_twist2_seed_flat/`。
+
+如果你修改了 SEED 输出目录，请同步更新 `train_seed.sh` 里的 `MOTION_FILE`，或者创建一个指向 `~/twist2/seed_g1_enriched_pkl/seed_dataset.yaml` 的软链接。
+
+如果你想同时使用 TWIST2 和 SEED，两条流程分别运行即可；它们使用不同的动作文件和日志目录，不会互相影响。
 
 #### 关于 W&B 以及保存内容
 
@@ -144,7 +189,7 @@ TWIST2_MOTION_FILE=/path/to/enriched/dataset.yaml bash play_twist2.sh
 TWIST2_MOTION_FILE=/path/to/enriched/dataset.yaml bash play_twist2.sh /path/to/model_12345.pt
 ```
 
-你也可以直接运行预训练模型脚本：
+也可以直接运行预训练脚本：
 
 ```bash
 TWIST2_MOTION_FILE=/path/to/enriched/dataset.yaml bash play_twist2_pretrained.sh
@@ -152,11 +197,27 @@ TWIST2_MOTION_FILE=/path/to/enriched/dataset.yaml bash play_twist2_pretrained.sh
 
 直接运行 `play_twist2_pretrained.sh` 时，会使用训练到 30K 步的预训练模型。
 
+对于 SEED 流程，可以使用对应的脚本，并指向同一个补全后的动作文件或单个动作 PKL：
+
+```bash
+TWIST2_MOTION_FILE=/path/to/enriched/seed_dataset.yaml bash play_seed.sh
+```
+
+如果想直接试用内置的 SEED 预训练模型：
+
+```bash
+TWIST2_MOTION_FILE=/path/to/enriched/seed_motion.pkl bash play_seed_pretrained.sh
+```
+
+`play_seed.sh` 在不显式传入检查点时，会自动从 `logs/rsl_rl/g1_twist2_seed_flat/` 下选择最新的检查点。
+
 说明：
 
 - play 脚本默认使用 `--device cpu` 和 `--viewer native`，
 - 额外的 CLI 参数会继续传递给 MJLab 的 `play` 命令，
 - 如果没有设置 `TWIST2_MOTION_FILE` 且终端是交互式的，脚本会提示输入。
+
+你可以只用 TWIST2 的播放脚本，只用 SEED 的播放脚本，或者两者都用，具体取决于你训练了哪些检查点。
 
 ### 5) Sim2sim 部署
 
@@ -169,6 +230,14 @@ bash sim2sim_pretrained.sh
 ```
 
 这会使用内置的 ONNX 模型和示例动作片段，无需训练或导出步骤。
+
+对于 SEED，对应脚本是：
+
+```bash
+TWIST2_MOTION_FILE=/path/to/enriched/seed_motion.pkl bash sim2sim_seed_pretrained.sh
+```
+
+`sim2sim_seed.sh` 和 TWIST2 版本的用法一样，只是它会去 `logs/rsl_rl/g1_twist2_seed_flat/` 查找检查点，并且要求 `TWIST2_MOTION_FILE` 指向单个补全后的 `.pkl` 动作文件。
 
 **使用自己训练的检查点：**
 
@@ -187,6 +256,8 @@ TWIST2_MOTION_FILE=/path/to/enriched/motion.pkl \
 TWIST2_MOTION_FILE=/path/to/enriched/motion.pkl \
   ./deploy/play_sim_twist2.sh
 ```
+
+和训练、播放一样，TWIST2 与 SEED 的 sim2sim 启动器也是彼此独立的：你可以按需使用任意一个，或者都用来对比结果。
 
 **工作原理：**
 

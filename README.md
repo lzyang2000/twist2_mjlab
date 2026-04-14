@@ -9,12 +9,13 @@
 
 `twist2_mjlab` is a standalone MJLab task package for Unitree G1 motion tracking based on [TWIST2](https://github.com/amazon-far/TWIST2) in order to enable further development on a supported physics engine (mjwarp) and training framework. The registered task is `Twist2-Flat-Unitree-G1`, and all task-specific logic lives locally under `src/twist2_mjlab/`.
 
-The package loads motion references through a PKL motion library, so the normal workflow is:
+The package loads motion references through a PKL motion library, and now supports two independent workflows. You can use either one or both, depending on which dataset you want to work with:
 
-1. enrich raw TWIST2 PKLs with MuJoCo forward kinematics (mainly for compatibility with the original motion commands of MJLab’s motion tracking task),
-2. point the task at the resulting motion file,
-3. train with `train_twist2.sh`, and
-4. visualize with `play_twist2.sh`.
+1. TWIST2: enrich raw [TWIST2 PKLs](https://drive.google.com/file/d/1JbW_InVD0ji5fvsR5kz7nbsXSXZQQXpd/view) with MuJoCo forward kinematics,
+2. SEED: convert the [SEED dataset](https://huggingface.co/datasets/bones-studio/seed) G1 CSV motions into enriched TWIST2 PKLs,
+3. point the task at the resulting dataset YAML,
+4. train with `train_twist2.sh` or `train_seed.sh`, and
+5. visualize with `play_twist2.sh` or `play_seed.sh`.
 
 ## TODOs
 - [x] Decoupled sim2sim pipeline (sim node + policy node over UDP at 50 Hz, real-time MuJoCo viewer with ghost overlay).
@@ -26,12 +27,19 @@ The package loads motion references through a PKL motion library, so the normal 
 twist2_mjlab/
 ├── pyproject.toml              # MJLab task package + MJLab entry point
 ├── train_twist2.sh             # Train `Twist2-Flat-Unitree-G1`
+├── train_seed.sh               # Train on the enriched SEED G1 dataset
 ├── play_twist2.sh              # Play the latest or a chosen checkpoint
 ├── play_twist2_pretrained.sh   # Play with the checked-in pretrained checkpoint
+├── play_seed.sh                # Play the latest or a chosen SEED checkpoint
+├── play_seed_pretrained.sh     # Play with the checked-in SEED pretrained checkpoint
 ├── sim2sim_pretrained.sh       # One-line sim2sim with pretrained ONNX
+├── sim2sim_seed.sh             # One-line sim2sim for SEED runs
+├── sim2sim_seed_pretrained.sh  # One-line sim2sim with the SEED pretrained ONNX
 ├── resources/
 │   ├── pretrained.pt           # Pretrained checkpoint (30K iterations)
 │   ├── pretrained.onnx         # Pretrained ONNX model (for sim2sim)
+│   ├── pretrained_seed.pt      # Pretrained SEED checkpoint (30K iterations)
+│   ├── pretrained_seed.onnx    # Pretrained SEED ONNX model (for sim2sim)
 │   ├── hello.gif               # README demo asset
 │   ├── example.gif             # README demo asset
 │   └── readme_zh.md            # Chinese usage guide
@@ -77,24 +85,61 @@ uv run python -m twist2_mjlab.scripts.enrich_pkl \
 
 This reads a dataset YAML, runs MuJoCo forward kinematics for each PKL, writes enriched PKLs with `body_pos_w` and `body_quat_w`, and saves a new `dataset.yaml` inside the output directory.
 
+#### SEED dataset support
+
+The repo also includes a dedicated SEED pipeline for the Hugging Face dataset [`bones-studio/seed`](https://huggingface.co/datasets/bones-studio/seed). Access requires accepting the dataset terms on Hugging Face first. This is optional; you can use the TWIST2 pipeline alone, the SEED pipeline alone, or both.
+
+The SEED enricher expects the G1 CSV motions plus the metadata CSV. The default paths in `seed_enrich.py` are:
+
+- `~/twist2/seed/g1/csv`
+- `~/twist2/seed/seed_metadata_v003.csv`
+
+If you keep the Hugging Face folder layout, either pass `--metadata` explicitly or symlink/copy `metadata/seed_metadata_v003.csv` to that default location.
+
+To convert the SEED G1 CSVs into enriched PKLs and dataset YAMLs:
+
+```bash
+uv run python -m twist2_mjlab.scripts.seed_enrich \
+  --csv-dir ~/twist2/seed/g1/csv \
+  --metadata ~/twist2/seed/metadata/seed_metadata_v003.csv \
+  --output-dir ~/twist2/seed_g1_enriched_pkl \
+  --fps 30 \
+  --workers 8
+```
+
+This writes enriched PKLs under `~/twist2/seed_g1_enriched_pkl/`, plus:
+
+- `seed_dataset.yaml` — all motions
+- `seed_dataset_filtered.yaml` — quality-filtered motions only
+
+If you prefer the script defaults and already mirrored the metadata CSV into `~/twist2/seed/seed_metadata_v003.csv`, you can omit the `--metadata` flag.
+
 **Note:** If you want to try playing first, this package already comes with a pretrained checkpoint at 30K iterations; just run `play_twist2_pretrained.sh` directly.
 
 ### 3) Train
 
-Use a motion file via `TWIST2_MOTION_FILE`. It can be either:
-
-- a single enriched `.pkl`, or
-- a dataset `.yaml` with multiple motions.
+For the original TWIST2 motions, use `TWIST2_MOTION_FILE` to point at either a single enriched `.pkl` or a dataset `.yaml` with multiple motions:
 
 ```bash
 TWIST2_MOTION_FILE=/path/to/enriched/dataset.yaml bash train_twist2.sh 0
+```
+
+For the SEED workflow, `train_seed.sh` is wired to the default output from `seed_enrich.py`:
+
+```bash
+bash train_seed.sh 0
 ```
 
 Notes:
 
 - the first positional argument is the GPU id (`0` by default),
 - extra CLI flags are forwarded to MJLab’s `train` command,
-- training logs are written under `logs/rsl_rl/g1_twist2_flat/`.
+- `train_twist2.sh` writes logs under `logs/rsl_rl/g1_twist2_flat/`,
+- `train_seed.sh` writes logs under `logs/rsl_rl/g1_twist2_seed_flat/`.
+
+If you change the SEED output directory, update the `MOTION_FILE` path inside `train_seed.sh` or create a symlink to `~/twist2/seed_g1_enriched_pkl/seed_dataset.yaml`.
+
+If you want to work with both datasets, just run the two pipelines separately; they use different motion files and log directories, so they won’t step on each other’s toes.
 
 #### Note: W&B setup and what gets saved
 
@@ -152,6 +197,22 @@ TWIST2_MOTION_FILE=/path/to/enriched/dataset.yaml bash play_twist2_pretrained.sh
 
 Running `play_twist2_pretrained.sh` directly uses the pretrained checkpoint at 30K iterations.
 
+For the SEED workflow, use the equivalent launcher and point it at the same enriched motion file or a single motion PKL:
+
+```bash
+TWIST2_MOTION_FILE=/path/to/enriched/seed_dataset.yaml bash play_seed.sh
+```
+
+To try the bundled SEED checkpoint instead:
+
+```bash
+TWIST2_MOTION_FILE=/path/to/enriched/seed_motion.pkl bash play_seed_pretrained.sh
+```
+
+`play_seed.sh` automatically selects the latest checkpoint from `logs/rsl_rl/g1_twist2_seed_flat/` when you do not pass one explicitly.
+
+You can freely use just the TWIST2 play scripts, just the SEED play scripts, or both, depending on which checkpoints you have trained.
+
 Notes:
 
 - the play script defaults to `--device cpu` and `--viewer native`,
@@ -169,6 +230,16 @@ bash sim2sim_pretrained.sh
 ```
 
 This uses the bundled ONNX model and a sample motion clip; no training or export step needed.
+
+For SEED, the matching launcher is:
+
+```bash
+TWIST2_MOTION_FILE=/path/to/enriched/seed_motion.pkl bash sim2sim_seed_pretrained.sh
+```
+
+`sim2sim_seed.sh` works the same way as the TWIST2 version, but it looks in `logs/rsl_rl/g1_twist2_seed_flat/` for checkpoints and expects `TWIST2_MOTION_FILE` to point to a single enriched `.pkl` motion.
+
+As with training and playback, the TWIST2 and SEED sim2sim launchers are independent: use whichever one matches the model and motion file you want, or both if you’re comparing results.
 
 **With your own checkpoint:**
 
