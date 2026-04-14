@@ -163,13 +163,22 @@ def feet_contact_forces(
   return torch.clamp(vertical_force - max_contact_force, min=0.0).sum(dim=1)
 
 
-def feet_stumble(env: ManagerBasedRlEnv, sensor_name: str) -> torch.Tensor:
+def feet_stumble(
+  env: ManagerBasedRlEnv,
+  sensor_name: str,
+  command_name: str | None = None,
+) -> torch.Tensor:
   sensor: ContactSensor = env.scene[sensor_name]
   force = sensor.data.force
   assert force is not None
   horizontal = torch.norm(force[..., :2], dim=-1)
   vertical = torch.abs(force[..., 2])
-  return torch.any(horizontal > 4.0 * vertical, dim=1).float()
+  result = torch.any(horizontal > 4.0 * vertical, dim=1).float()
+  if command_name is not None:
+    command = get_motion_command(env, command_name)
+    ground_mask = command.motion_lib.get_ground_motion_mask(command.motion_ids)
+    result = result * (~ground_mask).float()
+  return result
 
 
 def feet_slip(
@@ -177,6 +186,7 @@ def feet_slip(
   sensor_name: str,
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
   contact_force_threshold: float = 5.0,
+  command_name: str | None = None,
 ) -> torch.Tensor:
   asset = _get_robot(env, asset_cfg)
   sensor: ContactSensor = env.scene[sensor_name]
@@ -187,7 +197,12 @@ def feet_slip(
   foot_vel_xy = asset.data.body_link_lin_vel_w[:, foot_ids, :2]
   foot_speed_norm = torch.norm(foot_vel_xy, dim=-1)
   slip = torch.sqrt(torch.clamp(foot_speed_norm, min=0.0))
-  return torch.sum(slip * contact.float(), dim=1)
+  result = torch.sum(slip * contact.float(), dim=1)
+  if command_name is not None:
+    command = get_motion_command(env, command_name)
+    ground_mask = command.motion_lib.get_ground_motion_mask(command.motion_ids)
+    result = result * (~ground_mask).float()
+  return result
 
 
 def ang_vel_xy(

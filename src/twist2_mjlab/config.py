@@ -107,7 +107,7 @@ def _twist2_regularization_reward_cfg() -> dict[str, RewardTermCfg]:
     "feet_slip": RewardTermCfg(
       func=twist2_rewards.feet_slip,
       weight=-0.1,
-      params={"sensor_name": "feet_ground_contact"},
+      params={"sensor_name": "feet_ground_contact", "command_name": "motion"},
     ),
     "feet_contact_forces": RewardTermCfg(
       func=twist2_rewards.feet_contact_forces,
@@ -117,7 +117,7 @@ def _twist2_regularization_reward_cfg() -> dict[str, RewardTermCfg]:
     "feet_stumble": RewardTermCfg(
       func=twist2_rewards.feet_stumble,
       weight=-1.25,
-      params={"sensor_name": "feet_ground_contact"},
+      params={"sensor_name": "feet_ground_contact", "command_name": "motion"},
     ),
     "dof_pos_limits": RewardTermCfg(
       func=env_mdp.joint_pos_limits,
@@ -183,11 +183,6 @@ def _twist2_reward_cfg() -> dict[str, RewardTermCfg]:
 
 
 def _twist2_termination_cfg(*, play: bool = False) -> dict[str, TerminationTermCfg]:
-  if play:
-    return {
-      "time_out": TerminationTermCfg(func=env_mdp.time_out, time_out=True),
-    }
-
   return {
     "time_out": TerminationTermCfg(func=env_mdp.time_out, time_out=True),
     "motion_end": TerminationTermCfg(
@@ -491,3 +486,5 @@ def unitree_g1_twist2_flat_env_cfg(
   cfg.terminations = _twist2_termination_cfg(play=play)
   _set_default_num_envs(cfg, play=play)
   return cfg
+
+

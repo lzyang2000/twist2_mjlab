@@ -254,6 +254,59 @@ motions:
 
 The motion file path passed to `TWIST2_MOTION_FILE` can point to this YAML, or directly to a single enriched PKL.
 
+## Large motion datasets: CPU offload & GPU cache
+
+By default, `PklMotionLib` concatenates all motion frames into six tensors on the GPU. With ~14 tracked bodies, each frame takes ~960 B, so the GPU memory roughly equals `total_frames × 960 B`. Datasets like the full SEED library (~142K motions at 120 fps) exceed even a single H100's VRAM. Three opt-in modes handle this.
+
+### Mode 1 — Downsampling (simplest, highest speed)
+
+Load only a subset of the full motion dataset by filtering trajectories or frame decimation at load time.
+
+```bash
+# Example: load every Nth motion or subsample frames when loading the PKL
+# This is configured at the dataset/PKL preparation stage, not at runtime.
+```
+
+- **Pro:** all data fits in GPU memory; no pipeline stalls; full training speed.
+- **Con:** loses motion diversity compared to the full dataset.
+- **When to use:** you can afford to lose some trajectories or frame resolution, and speed is critical.
+- **Practical note (SEED):** by default, SEED enrichment downsamples from 120 fps to 30 fps, which reduces frame count by ~4× and allows the full dataset to fit on a single H100 without any offload or cache overhead.
+
+### Mode 2 — CPU offload (simple, no cache)
+
+Keeps the six motion tensors in pinned CPU RAM and transfers the blended frames back to the GPU each step.
+
+```bash
+--env.commands.motion.offload-to-cpu True
+```
+
+- **Trade-off:** each env step calls `.cpu()` on the frame indices, which forces a CUDA sync and drains the GPU pipeline. Expect roughly **2× slower** training loops in exchange for fitting arbitrarily large datasets in host RAM.
+- **When to use:** dataset does not fit in VRAM and you do not want the complexity of a cache; also useful as a baseline to compare against.
+
+### Mode 3 — GPU cache (recommended for large datasets)
+
+Keeps all data on pinned CPU RAM and maintains a GPU-resident cache that holds the active working set. With ~4096 envs each playing one motion at a time, the working set is only ~4 GB (well under the default 8 GB cache). Cache hits take the same GPU gather path as the no-offload mode; misses load the full motion from CPU in frame-contiguous chunks.
+
+```bash
+--env.commands.motion.gpu-cache True \
+--env.commands.motion.cache-capacity-gb 80.0
+```
+
+- **Performance:** on a 142K-motion dataset with a well-sized cache, ~98 % of `get_frame` calls are pure GPU gathers, so throughput is very close to the all-on-GPU baseline.
+- **Cache sizing rule of thumb:** `num_envs × avg_frames_per_motion × 960 B × 2`. For the full SEED dataset with 4096 envs we run at 80 GB on a 96 GB H100.
+- **Replacement policy:** append-only cache with a full reset on overflow (not per-motion LRU eviction).
+- **When cache fills up:** if the next motion would exceed remaining capacity, the cache map is cleared in O(1) and active motions are reloaded on subsequent accesses.
+- **Practical note (SEED dataset):** larger cache is usually better; too small a cache can hurt throughput because frequent full-cache resets force repeated reloading from CPU.
+
+### Which mode to pick
+
+| Situation | Recommendation |
+|-----------|----------------|
+| Dataset fits comfortably in VRAM | Leave both flags off (default) |
+| Dataset is very large, can subsample motions/frames | Downsample at dataset preparation time (Mode 1) |
+| Dataset is too large, prefer simplicity, accept slowdown | `--env.commands.motion.offload-to-cpu True` (Mode 2) |
+| Dataset is too large, want near-baseline speed | `--env.commands.motion.gpu-cache True` (Mode 3) |
+
 ## Where to tweak behavior
 
 If you want to modify the task, these files are the main ones to look at:

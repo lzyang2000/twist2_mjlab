@@ -4,3 +4,5 @@ logs
 __pycache__
 .venv
 .pytest_cache
+.vscode
+.codex

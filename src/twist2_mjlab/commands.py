@@ -54,7 +54,12 @@ class PklMotionCommand(CommandTerm):
 		)
 
 		self.motion_lib = PklMotionLib(
-			self.cfg.motion_file, self.cfg.body_names, device=self.device
+			self.cfg.motion_file,
+			self.cfg.body_names,
+			device=self.device,
+			offload_to_cpu=self.cfg.offload_to_cpu,
+			gpu_cache=self.cfg.gpu_cache,
+			cache_capacity_gb=self.cfg.cache_capacity_gb,
 		)
 
 		self.motion_ids = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
@@ -435,6 +440,10 @@ class PklMotionCommand(CommandTerm):
 @dataclass(kw_only=True)
 class PklMotionCommandCfg(MotionCommandCfg):
 	"""Configuration for PKL motion command."""
+
+	offload_to_cpu: bool = False
+	gpu_cache: bool = False
+	cache_capacity_gb: float = 8.0
 
 	def build(self, env: ManagerBasedRlEnv) -> PklMotionCommand:
 		return PklMotionCommand(self, env)
