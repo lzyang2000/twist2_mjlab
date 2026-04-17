@@ -9,7 +9,7 @@ DURATION="${KIMODO_DURATION:-5.0}"
 FPS="${TWIST2_MOTION_FPS:-30}"
 OUTPUT_DIR="${KIMODO_TWIST2_OUTPUT_DIR:-${SCRIPT_DIR}/generated/kimodo_bridge}"
 CHECKPOINT="${TWIST2_CHECKPOINT:-}"
-PLAY_MODE="pretrained"
+PLAY_MODE="seed_pretrained"
 FORCE=0
 
 run_kimodo_python_module() {
@@ -26,8 +26,8 @@ Options:
   --duration SEC       Motion duration in seconds (default: ${DURATION})
   --fps FPS            Motion FPS for TWIST2 PKL (default: ${FPS})
   --output-dir DIR     Output directory for generated files
-  --checkpoint PATH    Use this TWIST2 checkpoint instead of pretrained
-  --latest             Use latest TWIST2 checkpoint instead of pretrained
+  --checkpoint PATH    Use this TWIST2 checkpoint instead of the default SEED pretrained checkpoint
+  --latest             Use latest TWIST2 checkpoint instead of the default SEED pretrained checkpoint
   --no-play            Stop after generating CSV/PKL
   --force              Overwrite existing outputs for the same prompt hash
   -h, --help           Show this help
@@ -35,7 +35,7 @@ Options:
 Environment overrides:
   KIMODO_DIR
   KIMODO_MODEL
-  KIMODO_DURATION
+  KIMODO_DURATION"sprint and then turn 180 degrees"
   KIMODO_TWIST2_OUTPUT_DIR
   TWIST2_MOTION_FPS
   TWIST2_CHECKPOINT
@@ -46,6 +46,7 @@ Notes:
   - If kimodo_textencoder is already running, generation will be faster.
   - Activate the Kimodo env before running this script.
   - Kimodo is invoked via: python -m kimodo.scripts.generate
+  - Default playback uses play_seed_pretrained.sh.
 EOF
 }
 
@@ -187,9 +188,9 @@ fi
 
 echo "[3/3] Launching TWIST2 playback"
 if [[ "${PLAY_MODE}" == "checkpoint" ]]; then
-  TWIST2_MOTION_FILE="${PKL_PATH}" "${SCRIPT_DIR}/play_twist2.sh" "${CHECKPOINT}" "${PLAY_ARGS[@]}"
+  TWIST2_MOTION_FILE="${PKL_PATH}" bash "${SCRIPT_DIR}/play_twist2.sh" "${CHECKPOINT}" "${PLAY_ARGS[@]}"
 elif [[ "${PLAY_MODE}" == "latest" ]]; then
-  TWIST2_MOTION_FILE="${PKL_PATH}" "${SCRIPT_DIR}/play_twist2.sh" "${PLAY_ARGS[@]}"
+  TWIST2_MOTION_FILE="${PKL_PATH}" bash "${SCRIPT_DIR}/play_twist2.sh" "${PLAY_ARGS[@]}"
 else
-  TWIST2_MOTION_FILE="${PKL_PATH}" "${SCRIPT_DIR}/play_twist2_pretrained.sh" "${PLAY_ARGS[@]}"
+  TWIST2_MOTION_FILE="${PKL_PATH}" bash "${SCRIPT_DIR}/play_seed_pretrained.sh" "${PLAY_ARGS[@]}"
 fi
