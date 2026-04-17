@@ -58,6 +58,15 @@ def _batched_slerp(q0: torch.Tensor, q1: torch.Tensor, t: torch.Tensor) -> torch
 	return s0 * q0 + s1 * q1
 
 
+# Per-body velocity magnitudes above these are treated as corrupt and zeroed.
+# Tight bounds — mocap warmup-frame glitches produce huge spikes that are
+# clearly nonphysical, and aggressive humanoid motion rarely exceeds 3 at
+# the root body.
+_MAX_BODY_ANG_VEL = 3.0
+_MAX_BODY_LIN_VEL = 3.0
+_MAX_JOINT_VEL = 30.0
+
+
 def _compute_ang_vel_from_quat(quats: torch.Tensor, dt: float) -> torch.Tensor:
 	from mjlab.utils.lab_api.math import quat_box_minus
 
@@ -82,6 +91,15 @@ def _compute_ang_vel_from_quat(quats: torch.Tensor, dt: float) -> torch.Tensor:
 	)
 	omega[0] = quat_box_minus(flat_q[1], flat_q[0]) / dt
 	omega[-1] = quat_box_minus(flat_q[-1], flat_q[-2]) / dt
+
+	# Mocap clips sometimes begin/end with a neutral/warmup frame whose quat
+	# is far from the first motion frame. That produces a nonphysical spike
+	# which also pollutes the neighbors' central differences. Zero anything
+	# clearly outside the humanoid envelope and smear the mask by one frame.
+	bad = omega.norm(dim=-1, keepdim=True) > _MAX_BODY_ANG_VEL
+	bad[1:] |= bad[:-1].clone()
+	bad[:-1] |= bad[1:].clone()
+	omega = torch.where(bad, torch.zeros_like(omega), omega)
 
 	return omega.reshape(T, *orig_shape, 3)
 
@@ -168,6 +186,9 @@ class PklMotionLib:
 			return
 
 		joint_vel = torch.gradient(joint_pos, spacing=(dt,), dim=0)[0]
+		joint_vel = torch.where(
+			joint_vel.abs() > _MAX_JOINT_VEL, torch.zeros_like(joint_vel), joint_vel,
+		)
 
 		if "body_pos_w" not in data or "body_quat_w" not in data:
 			raise ValueError(
@@ -184,6 +205,8 @@ class PklMotionLib:
 		body_quat_w = all_body_quat_w[:, tracked_indices]
 
 		body_lin_vel_w = torch.gradient(body_pos_w, spacing=(dt,), dim=0)[0]
+		bad = body_lin_vel_w.norm(dim=-1, keepdim=True) > _MAX_BODY_LIN_VEL
+		body_lin_vel_w = torch.where(bad, torch.zeros_like(body_lin_vel_w), body_lin_vel_w)
 		body_ang_vel_w = _compute_ang_vel_from_quat(body_quat_w, dt)
 
 		motion_length = dt * (T - 1)
