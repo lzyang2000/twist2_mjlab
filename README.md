@@ -85,6 +85,35 @@ uv run python -m twist2_mjlab.scripts.enrich_pkl \
 
 This reads a dataset YAML, runs MuJoCo forward kinematics for each PKL, writes enriched PKLs with `body_pos_w` and `body_quat_w`, and saves a new `dataset.yaml` inside the output directory.
 
+#### Kimodo text-to-motion bridge
+
+If you have the sibling repo `~/kimodo` installed in its own conda environment and want a single prompt-to-TWIST2 workflow, this repo includes:
+
+- `src/twist2_mjlab/scripts/kimodo_csv_to_pkl.py` — converts Kimodo G1 MuJoCo qpos CSV into enriched TWIST2 PKL
+- `kimodo_to_twist2.sh` — prompt -> Kimodo generation -> CSV to PKL -> TWIST2 playback
+
+This bridge assumes the `kimodo` conda environment is already activated. Keep the Kimodo text encoder running in one terminal:
+
+```bash
+conda activate kimodo
+kimodo_textencoder
+```
+
+Then, in a second terminal, run the end-to-end bridge from `twist2_mjlab/`:
+
+```bash
+conda activate kimodo
+cd /home/yiling/twist2_mjlab
+./kimodo_to_twist2.sh "bend down and pick up a box"
+```
+
+Notes:
+
+- the bridge uses `python -m kimodo.scripts.generate` under the active `kimodo` env
+- it is designed for **G1** Kimodo models; do not use `Kimodo-SOMA-RP-v1` for direct TWIST2 ingestion
+- the default model in the wrapper is `Kimodo-G1-RP-v1`
+- this is an automated prompt -> generate full clip -> convert -> play workflow, not true streaming realtime generation
+
 #### SEED dataset support
 
 The repo also includes a dedicated SEED pipeline for the Hugging Face dataset [`bones-studio/seed`](https://huggingface.co/datasets/bones-studio/seed). Access requires accepting the dataset terms on Hugging Face first. This is optional; you can use the TWIST2 pipeline alone, the SEED pipeline alone, or both.
