@@ -91,6 +91,36 @@ uv run python -m twist2_mjlab.scripts.enrich_pkl \
 
 该脚本会读取 dataset YAML，为每个 PKL 运行 MuJoCo 前向运动学，写出包含 `body_pos_w` 和 `body_quat_w` 的补全版 PKL，并在输出目录中生成新的 `dataset.yaml`。
 
+#### Kimodo 文本到动作桥接
+
+如果你已经把同级目录下的 `~/kimodo` 仓库安装到独立的 conda 环境中，并希望通过一条命令完成“文本提示 -> Kimodo 生成 -> TWIST2 播放”，本仓库提供了：
+
+- `src/twist2_mjlab/scripts/kimodo_csv_to_pkl.py` —— 将 Kimodo 导出的 G1 MuJoCo qpos CSV 转成 TWIST2 可用的补全 PKL
+- `kimodo_to_twist2.sh` —— 文本提示 -> Kimodo 生成 -> CSV 转 PKL -> TWIST2 播放
+
+这个桥接流程假设 `kimodo` conda 环境已经激活。先在一个终端中保持 Kimodo 文本编码服务运行：
+
+```bash
+conda activate kimodo
+kimodo_textencoder
+```
+
+然后在第二个终端中，从 `twist2_mjlab/` 目录启动整条流程：
+
+```bash
+conda activate kimodo
+cd /home/yiling/twist2_mjlab
+./kimodo_to_twist2.sh "bend down and pick up a box"
+```
+
+说明：
+
+- 该桥接脚本会在当前激活的 `kimodo` 环境下通过 `python -m kimodo.scripts.generate` 调用 Kimodo
+- 该流程面向 **G1** Kimodo 模型，不能直接使用 `Kimodo-SOMA-RP-v1`
+- 包装脚本默认使用的模型是 `Kimodo-G1-RP-v1`
+- 默认播放路径使用 `play_seed_pretrained.sh`
+- 这是“提示词 -> 先生成完整片段 -> 转换 -> 播放”的自动化流程，不是真正的流式实时生成
+
 #### SEED 数据集支持
 
 仓库里还提供了面向 Hugging Face 数据集 [`bones-studio/seed`](https://huggingface.co/datasets/bones-studio/seed) 的专用 SEED 流程。访问前需要先在 Hugging Face 页面接受数据集条款。这个流程是可选的；你可以只用 TWIST2 流程、只用 SEED 流程，或者两个都用。
