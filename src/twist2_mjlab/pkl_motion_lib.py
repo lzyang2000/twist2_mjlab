@@ -220,29 +220,42 @@ class PklMotionLib:
 		self._num_motions = len(self._acc_weights)
 		self._total_frames = sum(self._acc_num_frames)
 
-		# Concatenate per-motion lists into flat arrays (on _data_device).
-		all_tensors = {
-			"joint_pos": torch.cat(self._acc_joint_pos, dim=0),
-			"joint_vel": torch.cat(self._acc_joint_vel, dim=0),
-			"body_pos_w": torch.cat(self._acc_body_pos_w, dim=0),
-			"body_quat_w": torch.cat(self._acc_body_quat_w, dim=0),
-			"body_lin_vel_w": torch.cat(self._acc_body_lin_vel_w, dim=0),
-			"body_ang_vel_w": torch.cat(self._acc_body_ang_vel_w, dim=0),
-		}
-
-		if self._use_cache:
-			# CPU pinned copies + GPU cache.
+		if self._offload:
+			# CPU pinned only — process one tensor at a time to keep peak memory at ~2x
+			# instead of ~3x dataset size. Free each accumulator list before pinning so
+			# only the concatenated tensor and its pinned copy coexist briefly.
 			for name in _TENSOR_NAMES:
-				setattr(self, f"_cpu_{name}", all_tensors[name].pin_memory())
-			self._init_cache(all_tensors)
-		elif self._offload:
-			# CPU pinned only — no GPU cache.
-			for name in _TENSOR_NAMES:
-				setattr(self, f"_all_{name}", all_tensors[name].pin_memory())
+				acc_list = getattr(self, f"_acc_{name}")
+				concatenated = torch.cat(acc_list, dim=0)
+				setattr(self, f"_acc_{name}", None)
+				del acc_list
+				setattr(self, f"_all_{name}", concatenated.pin_memory())
+				del concatenated
+			all_tensors = None
 		else:
-			# Everything on GPU.
-			for name in _TENSOR_NAMES:
-				setattr(self, f"_all_{name}", all_tensors[name])
+			# Concatenate per-motion lists into flat arrays (on _data_device).
+			all_tensors = {
+				"joint_pos": torch.cat(self._acc_joint_pos, dim=0),
+				"joint_vel": torch.cat(self._acc_joint_vel, dim=0),
+				"body_pos_w": torch.cat(self._acc_body_pos_w, dim=0),
+				"body_quat_w": torch.cat(self._acc_body_quat_w, dim=0),
+				"body_lin_vel_w": torch.cat(self._acc_body_lin_vel_w, dim=0),
+				"body_ang_vel_w": torch.cat(self._acc_body_ang_vel_w, dim=0),
+			}
+
+			if self._use_cache:
+				# CPU pinned copies + GPU cache.
+				for name in _TENSOR_NAMES:
+					setattr(self, f"_cpu_{name}", all_tensors[name].pin_memory())
+				self._init_cache(all_tensors)
+			else:
+				# Everything on GPU.
+				for name in _TENSOR_NAMES:
+					setattr(self, f"_all_{name}", all_tensors[name])
+
+			del self._acc_joint_pos, self._acc_joint_vel
+			del self._acc_body_pos_w, self._acc_body_quat_w
+			del self._acc_body_lin_vel_w, self._acc_body_ang_vel_w
 
 		# Small metadata — always on GPU.
 		self._motion_num_frames = torch.tensor(self._acc_num_frames, dtype=torch.long, device=self._device)
@@ -264,9 +277,6 @@ class PklMotionLib:
 		is_ground = [any(kw in desc.lower() for kw in _ground_keywords) for desc in self._acc_descriptions]
 		self._is_ground_motion = torch.tensor(is_ground, dtype=torch.bool, device=self._device)
 
-		del self._acc_joint_pos, self._acc_joint_vel
-		del self._acc_body_pos_w, self._acc_body_quat_w
-		del self._acc_body_lin_vel_w, self._acc_body_ang_vel_w
 		del self._acc_num_frames, self._acc_lengths, self._acc_weights
 		del self._acc_descriptions
 

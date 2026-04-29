@@ -185,7 +185,7 @@ class DeployMotionLib:
     """Wraps PklMotionLib for single-env numpy deployment."""
 
     def __init__(self, motion_file: str, motion_index: int = 0):
-        self._lib = PklMotionLib(motion_file, MOTION_BODY_NAMES, device="cpu")
+        self._lib = PklMotionLib(motion_file, MOTION_BODY_NAMES, device="cpu", offload_to_cpu=True)
         self._motion_id = motion_index % self._lib.num_motions()
         self._motion_length = float(
             self._lib.get_motion_length(torch.tensor([self._motion_id]))[0].item()
