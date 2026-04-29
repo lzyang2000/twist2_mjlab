@@ -2,7 +2,7 @@
 
 <div align="center">
   <img src="hello.gif" alt="TWIST2 问候 gif" width="360" />
-  <img src="example.gif" alt="TWIST2 动作跟踪示例" width="360" />
+  <img src="real.gif" alt="TWIST2 真实世界动作 gif" width="360" />
 </div>
 
 ## 概览
@@ -19,7 +19,7 @@
 
 ## TODO
 - [x] 解耦式 sim2sim 流水线（sim 节点 + policy 节点通过 UDP 50 Hz 通信，实时 MuJoCo 查看器带参考动作绿色影子叠加）。
-- [ ] 添加硬件部署说明，以及使用 MJLab G1 定义（增益、动作缩放等）的脚本。
+- [x] 在 Unitree G1 上的硬件部署（与 sim2sim 共用 policy 节点，硬件状态节点通过内置的 Unitree SDK2 读写机器人，PD 增益与动作缩放沿用 MJLab G1 定义）。
 
 ## 包含内容
 
@@ -43,12 +43,18 @@ twist2_mjlab/
 │   ├── hello.gif               # README 演示资源
 │   ├── example.gif             # README 演示资源
 │   └── readme_zh.md            # 中文使用说明
-├── deploy/                     # Sim2sim 部署流水线
-│   ├── play_sim_twist2.sh      # 启动脚本
+├── deploy/                     # Sim2sim + 真机部署流水线
+│   ├── play_sim_twist2.sh      # Sim2sim 启动脚本（MuJoCo + policy）
+│   ├── play_real_twist2.sh     # 真机启动脚本（G1 + policy）
+│   ├── install_unitree_sdk.sh  # 一次性安装 Unitree SDK2 绑定
 │   ├── export_onnx.py          # 检查点 -> ONNX 导出
 │   ├── common/udp_sync.py      # UDP 状态/动作协议
 │   ├── sim/sim_node.py         # MuJoCo 物理仿真 + 参考动作半透明绿色叠加
-│   └── policy/twist2_policy.py # ONNX 推理 + 动作库
+│   ├── policy/twist2_policy.py # ONNX 推理 + 动作库
+│   └── real/                   # 真机部署
+│       ├── hardware_node.py        # 通过 unitree_interface 运行 50 Hz G1 控制循环
+│       ├── g1_robot_constants.py   # 冻结的 PD 增益 / 默认姿态
+│       └── unitree_sdk2_wrapper/   # Git 子模块（SDK2 C++ 源码 + pybind11）
 └── src/twist2_mjlab/
     ├── __init__.py             # 任务注册
     ├── commands.py             # PKL 动作命令与重采样
@@ -84,6 +90,36 @@ uv run python -m twist2_mjlab.scripts.enrich_pkl \
 ```
 
 该脚本会读取 dataset YAML，为每个 PKL 运行 MuJoCo 前向运动学，写出包含 `body_pos_w` 和 `body_quat_w` 的补全版 PKL，并在输出目录中生成新的 `dataset.yaml`。
+
+#### Kimodo 文本到动作桥接
+
+如果你已经把同级目录下的 `~/kimodo` 仓库安装到独立的 conda 环境中，并希望通过一条命令完成“文本提示 -> Kimodo 生成 -> TWIST2 播放”，本仓库提供了：
+
+- `src/twist2_mjlab/scripts/kimodo_csv_to_pkl.py` —— 将 Kimodo 导出的 G1 MuJoCo qpos CSV 转成 TWIST2 可用的补全 PKL
+- `kimodo_to_twist2.sh` —— 文本提示 -> Kimodo 生成 -> CSV 转 PKL -> TWIST2 播放
+
+这个桥接流程假设 `kimodo` conda 环境已经激活。先在一个终端中保持 Kimodo 文本编码服务运行：
+
+```bash
+conda activate kimodo
+kimodo_textencoder
+```
+
+然后在第二个终端中，从 `twist2_mjlab/` 目录启动整条流程：
+
+```bash
+conda activate kimodo
+cd /home/yiling/twist2_mjlab
+./kimodo_to_twist2.sh "bend down and pick up a box"
+```
+
+说明：
+
+- 该桥接脚本会在当前激活的 `kimodo` 环境下通过 `python -m kimodo.scripts.generate` 调用 Kimodo
+- 该流程面向 **G1** Kimodo 模型，不能直接使用 `Kimodo-SOMA-RP-v1`
+- 包装脚本默认使用的模型是 `Kimodo-G1-RP-v1`
+- 默认播放路径使用 `play_seed_pretrained.sh`
+- 这是“提示词 -> 先生成完整片段 -> 转换 -> 播放”的自动化流程，不是真正的流式实时生成
 
 #### SEED 数据集支持
 
@@ -290,6 +326,66 @@ sim_node (MuJoCo, 1000 Hz)        policy_node (ONNX, 50 Hz)
 | `TWIST2_MOTION_FILE` | 补全后的 `.pkl` 或 dataset `.yaml` 的路径（必填） |
 | `TWIST2_MOTION_INDEX` | 多动作数据集中要播放的动作索引（默认 `0`） |
 | `TWIST2_INIT_YAW_DEG` | 机器人初始偏航角，单位度（默认 `0`） |
+
+### 6) 硬件部署
+
+真机部署与 sim2sim 共用同一个 policy 节点和 UDP 协议，只是把 MuJoCo 仿真换成了一个 50 Hz 的硬件循环：通过内置的 Unitree SDK2 包装层读取 G1 的 IMU 与关节状态，再把 policy 输出的关节目标以 PD 控制下发到电机，PD 增益与 MJLab G1 定义保持一致。
+
+**前置条件：**
+
+- Ubuntu 主机，通过有线网络连接 G1（默认接口 `eth0`），
+- Python 3.10（已由 `pyproject.toml` 固定），以便使用预编译的 `.cpython-310` 绑定，
+- 首次运行需要 `sudo` 权限以安装 `build-essential`、`cmake`、`python3-dev`、`pybind11-dev`。
+
+**一次性安装 Unitree SDK2 绑定：**
+
+```bash
+git submodule update --init deploy/real/unitree_sdk2_wrapper
+./deploy/install_unitree_sdk.sh
+```
+
+脚本会编译 C++ 包装层，并把 `unitree_interface.so` 安装到 twist2_mjlab 的 uv 环境里。可以用下面的命令验证：
+
+```bash
+uv run python -c "import unitree_interface; print('ok')"
+```
+
+**在机器人上运行：**
+
+```bash
+TWIST2_MOTION_FILE=/path/to/enriched/motion.pkl \
+  TWIST2_REAL_NET=eth0 \
+  ./deploy/play_real_twist2.sh /path/to/model_29999.pt
+```
+
+模型参数约定与 `play_sim_twist2.sh` 完全相同：可以传入 `.pt`（自动导出为 ONNX）、直接传入 `.onnx`，或不传任何参数以自动选择 `logs/rsl_rl/g1_twist2_flat/` 下最新的 checkpoint。
+
+**手柄启动流程**（与 `hardware_node.py` 控制台提示一致）：
+
+1. **START** — 解除阻尼保持，在 2 秒内平滑过渡到默认站立姿态。
+2. **A** — 进入 50 Hz policy 控制循环。
+3. **B** — 优雅退出（在当前姿态上进入阻尼保持）。
+4. **SELECT** — 紧急阻尼停止，发生任何异常情况时优先按这个键。
+
+**与 sim2sim 的差异：**
+
+- 没有 MuJoCo 查看器，也没有绿色影子叠加。硬件节点仍会**接收** policy 发回的参考姿态字段，但直接丢弃，因为没有渲染目标。
+- 机器人没有里程计，所以状态包里 `root_pos` 和 `body_lin_vel` 填 0。Policy 的本体感知只使用 `body_ang_vel`、IMU 四元数和关节状态，这与训练时一致。
+- 不依赖 ROS。硬件节点只用 UDP + DDS（DDS 部分由内置 SDK 包装层处理）。
+
+**环境变量：**
+
+| 变量 | 说明 |
+|------|------|
+| `TWIST2_MOTION_FILE` | 动作参考文件（与 sim2sim 相同） |
+| `TWIST2_MOTION_INDEX` | dataset YAML 中的动作索引（默认 `0`） |
+| `TWIST2_REAL_NET` | 连接 G1 的 DDS 网络接口（默认 `eth0`） |
+
+**安全建议：**
+
+- 始终保持手握手柄，**SELECT** 是最快的应急出口。
+- 启动前请把机器人悬吊起来，或者由另一人扶住。按下 **A** 的瞬间控制权就交给 policy 了。
+- Ctrl-C 时启动脚本的清理钩子会 `pkill` 掉两个节点，硬件节点退出前会先在当前姿态阻尼保持。
 
 ## 动作文件格式
 

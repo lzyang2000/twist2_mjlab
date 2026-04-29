@@ -2,7 +2,7 @@
 
 <div align="center">
     <img src="resources/hello.gif" alt="TWIST2 hello gif" width="360" />
-  <img src="resources/example.gif" alt="TWIST2 motion tracking example" width="360" />
+  <img src="resources/real.gif" alt="TWIST2 hello in real world gif" width="360" />
 </div>
 
 ## Overview
@@ -19,7 +19,7 @@ The package loads motion references through a PKL motion library, and now suppor
 
 ## TODOs
 - [x] Decoupled sim2sim pipeline (sim node + policy node over UDP at 50 Hz, real-time MuJoCo viewer with ghost overlay).
-- [ ] Add hardware deployment instructions and scripts that use the MJLab G1 definitions (gains, action scale, etc.).
+- [x] Hardware deployment on Unitree G1 (shared policy node, hardware state node using the vendored Unitree SDK2 and the MJLab G1 gains/action scale).
 
 ## What’s in the package
 
@@ -43,12 +43,18 @@ twist2_mjlab/
 │   ├── hello.gif               # README demo asset
 │   ├── example.gif             # README demo asset
 │   └── readme_zh.md            # Chinese usage guide
-├── deploy/                     # Sim2sim deployment pipeline
-│   ├── play_sim_twist2.sh      # Orchestration script
+├── deploy/                     # Sim2sim + real-hardware deployment
+│   ├── play_sim_twist2.sh      # Sim2sim orchestration (MuJoCo + policy)
+│   ├── play_real_twist2.sh     # Real-hardware orchestration (G1 + policy)
+│   ├── install_unitree_sdk.sh  # One-time Unitree SDK2 build + install
 │   ├── export_onnx.py          # Checkpoint -> ONNX export
 │   ├── common/udp_sync.py      # UDP state/action protocol
 │   ├── sim/sim_node.py         # MuJoCo physics + ghost overlay viewer
-│   └── policy/twist2_policy.py # ONNX inference + motion library
+│   ├── policy/twist2_policy.py # ONNX inference + motion library
+│   └── real/                   # Real-hardware deployment
+│       ├── hardware_node.py        # 50 Hz G1 loop via unitree_interface
+│       ├── g1_robot_constants.py   # Frozen PD gains / default pose
+│       └── unitree_sdk2_wrapper/   # Git submodule (SDK2 C++ + pybind11)
 └── src/twist2_mjlab/
     ├── __init__.py             # Task registration
     ├── commands.py             # PKL motion command and resampling
@@ -84,6 +90,35 @@ uv run python -m twist2_mjlab.scripts.enrich_pkl \
 ```
 
 This reads a dataset YAML, runs MuJoCo forward kinematics for each PKL, writes enriched PKLs with `body_pos_w` and `body_quat_w`, and saves a new `dataset.yaml` inside the output directory.
+
+#### Kimodo text-to-motion bridge
+
+If you have the sibling repo `~/kimodo` installed in its own conda environment and want a single prompt-to-TWIST2 workflow, this repo includes:
+
+- `src/twist2_mjlab/scripts/kimodo_csv_to_pkl.py` — converts Kimodo G1 MuJoCo qpos CSV into enriched TWIST2 PKL
+- `kimodo_to_twist2.sh` — prompt -> Kimodo generation -> CSV to PKL -> TWIST2 playback
+
+This bridge assumes the `kimodo` conda environment is already activated. Keep the Kimodo text encoder running in one terminal:
+
+```bash
+conda activate kimodo
+kimodo_textencoder
+```
+
+Then, in a second terminal, run the end-to-end bridge from `twist2_mjlab/`:
+
+```bash
+conda activate kimodo
+cd /home/yiling/twist2_mjlab
+./kimodo_to_twist2.sh "bend down and pick up a box"
+```
+
+Notes:
+
+- the bridge uses `python -m kimodo.scripts.generate` under the active `kimodo` env
+- it is designed for **G1** Kimodo models; do not use `Kimodo-SOMA-RP-v1` for direct TWIST2 ingestion
+- the default model in the wrapper is `Kimodo-G1-RP-v1`
+- this is an automated prompt -> generate full clip -> convert -> play workflow, not true streaming realtime generation
 
 #### SEED dataset support
 
@@ -290,6 +325,66 @@ sim_node (MuJoCo, 1000 Hz)        policy_node (ONNX, 50 Hz)
 | `TWIST2_MOTION_FILE` | Path to an enriched `.pkl` or a dataset `.yaml` (required) |
 | `TWIST2_MOTION_INDEX` | Index of the motion to play from a multi-motion dataset (default `0`) |
 | `TWIST2_INIT_YAW_DEG` | Initial robot yaw in degrees (default `0`) |
+
+### 6) Hardware deployment
+
+The real-hardware path reuses the same policy node and UDP protocol as sim2sim, and swaps the MuJoCo simulation for a 50 Hz loop that reads IMU + joint state from a Unitree G1 via a vendored SDK2 wrapper and applies the policy's joint targets with PD gains matched to the MJLab G1 definitions.
+
+**Prerequisites:**
+
+- Ubuntu host wired to the G1 (default interface `eth0`),
+- Python 3.10 (already pinned by `pyproject.toml`) so the prebuilt `.cpython-310` binding is valid,
+- `sudo` access on first run to install `build-essential`, `cmake`, `python3-dev`, `pybind11-dev`.
+
+**One-time install of the Unitree SDK2 binding:**
+
+```bash
+git submodule update --init deploy/real/unitree_sdk2_wrapper
+./deploy/install_unitree_sdk.sh
+```
+
+This builds the C++ wrapper and drops `unitree_interface.so` into the twist2_mjlab uv environment. Verify with:
+
+```bash
+uv run python -c "import unitree_interface; print('ok')"
+```
+
+**Run on the robot:**
+
+```bash
+TWIST2_MOTION_FILE=/path/to/enriched/motion.pkl \
+  TWIST2_REAL_NET=eth0 \
+  ./deploy/play_real_twist2.sh /path/to/model_29999.pt
+```
+
+Same model-argument conventions as `play_sim_twist2.sh`: pass a `.pt` (auto-exports to ONNX), a `.onnx` directly, or no arg to auto-select the latest checkpoint from `logs/rsl_rl/g1_twist2_flat/`.
+
+**Wireless-remote startup sequence** (exactly as `hardware_node.py` prints):
+
+1. **START** — release damped hold and interpolate to the default standing pose over 2 s.
+2. **A** — enter the 50 Hz policy loop.
+3. **B** — graceful exit (damped hold at the current pose).
+4. **SELECT** — emergency damp-stop; use this first if anything looks wrong.
+
+**What's different from sim2sim:**
+
+- No MuJoCo viewer, no ghost overlay. The hardware node still *receives* the reference-motion fields the policy sends back, but discards them since there is nothing to render.
+- The robot has no odometry, so the state packet carries zeros for `root_pos` and `body_lin_vel`. The policy's proprioception only uses `body_ang_vel`, the IMU quaternion, and joint state, so this matches training.
+- No ROS. The hardware node is pure UDP + DDS (the DDS side is handled inside the vendored SDK wrapper).
+
+**Environment variables:**
+
+| Variable | Description |
+|----------|-------------|
+| `TWIST2_MOTION_FILE` | Motion reference (same as sim2sim) |
+| `TWIST2_MOTION_INDEX` | Motion index inside a dataset YAML (default `0`) |
+| `TWIST2_REAL_NET` | DDS network interface for the G1 (default `eth0`) |
+
+**Safety notes:**
+
+- Always keep a hand on the wireless remote; **SELECT** is the fastest way out.
+- Start with the robot suspended or with a second person holding it. The first press of **A** hands control to the policy immediately.
+- On Ctrl-C the launcher's cleanup trap `pkill`s both nodes, and the hardware node damps at the current pose before exiting.
 
 ## Motion file format
 
