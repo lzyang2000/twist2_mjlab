@@ -173,6 +173,34 @@ def _twist2_regularization_reward_cfg() -> dict[str, RewardTermCfg]:
       weight=-2e-4,
       params={"asset_cfg": all_joints},
     ),
+    # ------------------------------------------------------------------
+    # Stability rewards (adapted from IHMC IsaacLab)
+    # ------------------------------------------------------------------
+    "com_in_support_polygon": RewardTermCfg(
+      func=twist2_rewards.simplified_com_in_support_polygon,
+      weight=0.2,
+      params={"feet_sensor_cfg": SceneEntityCfg("feet_ground_contact")},
+    ),
+    "capture_point_in_support_polygon": RewardTermCfg(
+      func=twist2_rewards.simplified_capture_point_in_support_polygon,
+      weight=0.3,
+      params={"feet_sensor_cfg": SceneEntityCfg("feet_ground_contact")},
+    ),
+    "ankle_hip_step": RewardTermCfg(
+      func=twist2_rewards.AnkleHipStepReward,
+      weight=0.2,
+      params={"feet_sensor_cfg": SceneEntityCfg("feet_ground_contact")},
+    ),
+    "linear_momentum_change": RewardTermCfg(
+      func=twist2_rewards.LinearMomentumChangePenalty,
+      weight=1e-6,
+      params={},
+    ),
+    "angular_momentum_change": RewardTermCfg(
+      func=twist2_rewards.AngularMomentumChangePenalty,
+      weight=1e-5,
+      params={},
+    ),
   }
 
 
@@ -409,6 +437,7 @@ def unitree_g1_pkl_tracking_env_cfg(
     adaptive_uniform_ratio=old_cmd.adaptive_uniform_ratio,
     adaptive_alpha=old_cmd.adaptive_alpha,
     sampling_mode=old_cmd.sampling_mode,
+    offload_to_cpu=True,
   )
 
   if play:
@@ -472,6 +501,8 @@ def unitree_g1_twist2_flat_env_cfg(
   play: bool = False,
 ) -> ManagerBasedRlEnvCfg:
   cfg = unitree_g1_pkl_tracking_custom_ppo_env_cfg(play=play)
+
+  cfg.sim.njmax = 400
 
   sensors = []
   for sensor_cfg in cfg.scene.sensors or ():

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -euxo pipefail
 
 GPU_ID="0"
 if [[ -n "${1:-}" && "${1:-}" != --* ]]; then
@@ -22,7 +22,7 @@ if [[ -z "${MOTION_FILE}" ]]; then
   exit 1
 fi
 
-NUM_ENVS="${TWIST2_NUM_ENVS:-4096}"
+NUM_ENVS="${TWIST2_NUM_ENVS:-2048}"
 VIDEO_INTERVAL="${TWIST2_VIDEO_INTERVAL:-48000}"
 VIDEO_LENGTH="${TWIST2_VIDEO_LENGTH:-500}"
 
